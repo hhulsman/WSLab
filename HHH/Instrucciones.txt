@@ -1,0 +1,82 @@
+
+
+Documents\Visual Studio Code Projects\WSLab:		C�digo oficial, que va a github (HHulsman/WSLab), y desde all� a Microsoft/WSLab
+Documents\Visual Studio Code Projects\WSLab - apuntes:	Este directorio, con instrucciones, y ficheros LabConfig espec�ficos
+
+
+Para empezar desde cero:
+
+Tener descargado las ISO's de W2016, W2019, Win10, versiones evaluaci�n, y sus Actualizaciones Cumulativas y Servicing Updates.
+
+
+- Descargar proyecto desde https://github.com/microsoft/WSLab.github
+
+	Abrir VSCode
+	Cerrar Workspace si hay uno abierto
+	
+	# Initial setup
+	Set-Location -Path "D:\Users\hhulsman\Documents\Visual Studio Code Projects"
+	git clone https://github.com/microsoft/WSLab.git
+	git remote rename origin upstream
+	git remote add origin https://github.com/hhulsman/WSLab
+	
+	# Create new branch
+	git pull upstream master                        # Actualizar por si acaso
+	git checkout -b Localize						# Create local branch
+	git remote push origin Localize					# Create remote branch
+	git push --set-upstream origin Localize			# Config upstream for new branch
+
+
+
+	# Setup on new machine, once the repository on Github exists
+	Set-Location -Path "D:\Users\hhulsman\Documents\Visual Studio Code Projects"
+	git clone https://github.com/microsoft/WSLab.git
+	git remote rename origin upstream
+	git remote add origin https://github.com/hhulsman/WSLab
+	
+	# Add branch Localize
+	git pull origin Localize
+
+
+	# Prepare files to modify
+	Set-Location -Path "D:\Users\hhulsman\Documents\Visual Studio Code Projects\WSLab"
+	mkdir HHH
+	cd HHH
+	copy ..\Scripts\*.*
+	
+	
+	
+ 
+
+- Copiar desde WSLab - apuntes:
+	- Labconfig HHH.ps1 y sobrescribir LabConfig.ps1 en destino
+
+En caso de que el lab se va a crear en un disco de un cluster de conmutaci�n de error (C:\ClusterVolume):
+	- Modificar en destino (cosas para futuras PRs):
+		- 2_CreateParentDisks.ps1:
+		  Cambiar $psscriptroot\Temp\Mountdir por $env:Temp\Mountdir (todas las ocurrencias)
+		  Es porque Mount-WindowsImage (linea 535) da error si es sobre un disco de Failover Cluster)
+	- Lo mismo en 3_Deploy.ps1
+
+Cambiar en 3_Deploy.ps1:
+	En l�nea 1326: Cambiar "Guest Service Interface" por "Interfaz de servicio invitado"
+
+
+Ejecutar 1_Prereqs.ps1
+Ejecutar 2_CreateParentDisks.ps1
+
+Si se va a necesitar VMs con Windows 10:
+	Ejecutar ParentDisks\CreateParentDisks.ps1
+	Cuando solicita el nombre del fichero a generar (por defecto sugiere Win10RS5_G2.vhdx, poner: Win10_G2.vhdx (no olvidar la extensi�n)
+
+Ejecutar 3_Deploy.ps1 (o se habrá renombrado a Deploy.ps1?)
+
+Ejecutar 4_Deploy.ps1 (habilita RDP en DC)
+
+Iniciar sesión en DC
+Abrir Powershell ISE en modo admin
+Arrancar las VMs S2D1 hasta S2D4
+Copiar y ejecutar Scenario.ps1. Esto crea el clúster y S2D
+
+Al final de las pruebas: Cleanup.ps1
+
