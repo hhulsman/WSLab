@@ -6,6 +6,8 @@ If (!( $isAdmin )) {
     exit
 }
 
+$PSScriptRoot
+
 #region Functions
 
     function WriteInfo($message){
@@ -137,6 +139,25 @@ If (!( $isAdmin )) {
             $LabConfig.DHCPscope="10.0.0.0"
         }
 
+        If (!$LabConfig.LocalAdminUser){
+            $LabConfig.LocalAdminUser="Administrator"
+        }
+
+        If (!$LabConfig.LocalAdminGroup){
+            $LabConfig.LocalAdminGroup="Administrators"
+        }
+
+        If (!$LabConfig.DomainAdminGroup){
+            $LabConfig.DomainAdminGroup="Domain Admins"
+        }
+
+        If (!$LabConfig.SchemaAdminGroup){
+            $LabConfig.SchemaAdminGroup="Schema Admins"
+        }
+
+        If (!$LabConfig.EnterpriseAdminGroup){
+            $LabConfig.EnterpriseAdminGroup="Enterprise Admins"
+        }
 
     #create some built-in variables
         $DN=$null
@@ -525,25 +546,25 @@ If (!( $isAdmin )) {
 
         #Apply Unattend to VM
             WriteInfoHighlighted "`t Applying Unattend and copying Powershell DSC Modules"
-            if (Test-Path "$PSScriptRoot\Temp\mountdir"){
-                Remove-Item -Path "$PSScriptRoot\Temp\mountdir\" -Recurse -Force
+            if (Test-Path "$env:tmp\mountdir"){
+                Remove-Item -Path "$env:tmp\mountdir\" -Recurse -Force
             }
             if (Test-Path "$PSScriptRoot\Temp\unattend"){
                 Remove-Item -Path "$PSScriptRoot\Temp\unattend.xml"
             }
             $unattendfile=CreateUnattendFileVHD -Computername $DCName -AdminPassword $AdminPassword -path "$PSScriptRoot\temp\" -TimeZone $TimeZone
-            New-item -type directory -Path $PSScriptRoot\Temp\mountdir -force
-            Mount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -ImagePath $VHDPath -Index 1
-            Use-WindowsUnattend -Path "$PSScriptRoot\Temp\mountdir" -UnattendPath $unattendFile 
-            #&"$PSScriptRoot\Temp\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$PSScriptRoot\Temp\mountdir
-            #&"$PSScriptRoot\Temp\dism\dism" /image:$PSScriptRoot\Temp\mountdir /Apply-Unattend:$unattendfile
-            New-item -type directory -Path "$PSScriptRoot\Temp\mountdir\Windows\Panther" -force
-            Copy-Item -Path $unattendfile -Destination "$PSScriptRoot\Temp\mountdir\Windows\Panther\unattend.xml" -force
-            Copy-Item -Path "$PSScriptRoot\Temp\DSC\*" -Destination "$PSScriptRoot\Temp\mountdir\Program Files\WindowsPowerShell\Modules\" -Recurse -force
+            New-item -type directory -Path $env:tmp\mountdir -force
+            Mount-WindowsImage -Path "$env:tmp\mountdir" -ImagePath $VHDPath -Index 1
+            Use-WindowsUnattend -Path "$env:tmp\mountdir" -UnattendPath $unattendFile
+            #&"$PSScriptRoot\Temp\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$env:tmp\mountdir
+            #&"$PSScriptRoot\Temp\dism\dism" /image:$env:tmp\mountdir /Apply-Unattend:$unattendfile
+            New-item -type directory -Path "$env:tmp\mountdir\Windows\Panther" -force
+            Copy-Item -Path $unattendfile -Destination "$env:tmp\mountdir\Windows\Panther\unattend.xml" -force
+            Copy-Item -Path "$PSScriptRoot\Temp\DSC\*" -Destination "$env:tmp\mountdir\Program Files\WindowsPowerShell\Modules\" -Recurse -force
 
         #Create credentials for DSC
 
-            $username = "$($LabConfig.DomainNetbiosName)\Administrator"
+            $username = "$($LabConfig.DomainNetbiosName)\$($LabConfig.LocalAdminUser)"
             $password = $AdminPassword
             $secstr = New-Object -TypeName System.Security.SecureString
             $password.ToCharArray() | ForEach-Object {$secstr.AppendChar($_)}
@@ -698,14 +719,14 @@ If (!( $isAdmin )) {
 
                     xADGroup DomainAdmins
                     {
-                        GroupName = "Domain Admins"
+                        GroupName = "$($LabConfig.DomainAdminGroup)"
                         DependsOn = "[xADUser]VMM_SA"
                         MembersToInclude = "VMM_SA",$Node.DomainAdminName
                     }
 
                     xADGroup SchemaAdmins
                     {
-                        GroupName = "Schema Admins"
+                        GroupName = "$($LabConfig.SchemaAdminGroup)"
                         GroupScope = "Universal"
                         DependsOn = "[xADUser]VMM_SA"
                         MembersToInclude = $Node.DomainAdminName
@@ -713,7 +734,7 @@ If (!( $isAdmin )) {
 
                     xADGroup EntAdmins
                     {
-                        GroupName = "Enterprise Admins"
+                        GroupName = "$($LabConfig.EnterpriseAdminGroup)"
                         GroupScope = "Universal"
                         DependsOn = "[xADUser]VMM_SA"
                         MembersToInclude = $Node.DomainAdminName
@@ -722,7 +743,7 @@ If (!( $isAdmin )) {
                     xADUser AdministratorNeverExpires
                     {
                         DomainName = $Node.DomainName
-                        UserName = "Administrator"
+                        UserName = "$($Labconfig.LocalAdminUser)"
                         Ensure = "Present"
                         DependsOn = "[xADDomain]FirstDS"
                         PasswordNeverExpires = $true
@@ -869,13 +890,13 @@ If (!( $isAdmin )) {
         #copy DSC MOF files to DC
             WriteInfoHighlighted "`t Copying DSC configurations (pending.mof and metaconfig.mof)"
             New-item -type directory -Path "$PSScriptRoot\Temp\config" -ErrorAction Ignore
-            Copy-Item -path "$PSScriptRoot\Temp\config\dc.mof"      -Destination "$PSScriptRoot\Temp\mountdir\Windows\system32\Configuration\pending.mof"
-            Copy-Item -Path "$PSScriptRoot\Temp\config\dc.meta.mof" -Destination "$PSScriptRoot\Temp\mountdir\Windows\system32\Configuration\metaconfig.mof"
+            Copy-Item -path "$PSScriptRoot\Temp\config\dc.mof"      -Destination "$env:tmp\mountdir\Windows\system32\Configuration\pending.mof"
+            Copy-Item -Path "$PSScriptRoot\Temp\config\dc.meta.mof" -Destination "$env:tmp\mountdir\Windows\system32\Configuration\metaconfig.mof"
 
         #close VHD and apply changes
             WriteInfoHighlighted "`t Applying changes to VHD"
-            Dismount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -Save
-            #&"$PSScriptRoot\Temp\dism\dism" /Unmount-Image /MountDir:$PSScriptRoot\Temp\mountdir /Commit
+            Dismount-WindowsImage -Path "$env:tmp\mountdir" -Save
+            #&"$PSScriptRoot\Temp\dism\dism" /Unmount-Image /MountDir:$env:tmp\mountdir /Commit
 
         #Start DC VM and wait for configuration
             WriteInfoHighlighted "`t Starting DC"

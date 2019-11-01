@@ -178,6 +178,9 @@ If (!( $isAdmin )) {
             $ComputerName,
             [parameter(Mandatory=$true)]
             [string]
+            $LocalAdminUser,
+            [parameter(Mandatory=$true)]
+            [string]
             $AdminPassword,
             [parameter(Mandatory=$true)]
             [string]
@@ -212,7 +215,7 @@ If (!( $isAdmin )) {
                 <Credentials>
                     <Domain>$DomainName</Domain>
                     <Password>$AdminPassword</Password>
-                    <Username>Administrator</Username>
+                    <Username>$LocalAdminUser</Username>
                 </Credentials>
                 <JoinDomain>$DomainName</JoinDomain>
         </Identification>
@@ -251,6 +254,9 @@ If (!( $isAdmin )) {
             $AdminPassword,
             [parameter(Mandatory=$true)]
             [string]
+            $LocalAdminGroup,
+            [parameter(Mandatory=$true)]
+            [string]
             $AdditionalAdminName
         )
 @"
@@ -262,7 +268,7 @@ If (!( $isAdmin )) {
         </Password>
         <Description>$AdditionalAdminName admin account</Description>
         <DisplayName>$AdditionalAdminName</DisplayName>
-        <Group>Administrators</Group>
+        <Group>$LocalAdminGroup</Group>
         <Name>$AdditionalAdminName</Name>
     </LocalAccount>
 </LocalAccounts>
@@ -426,7 +432,12 @@ If (!( $isAdmin )) {
         )
         WriteInfoHighlighted "Creating VM $($VMConfig.VMName)"
         WriteInfo "`t Looking for Parent Disk"
-        $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        # Use ServerParentPath in case of multiple labs over one set of parentdisks
+        if ($LabConfig.ServerParentPath){
+            $serverparent=Get-ChildItem $LabConfig.ServerParentPath -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        }else{
+            $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        }
             
         if ($serverparent -eq $null){
             WriteErrorAndExit "Server parent disk $($VMConfig.ParentVHD) not found."
@@ -598,13 +609,13 @@ If (!( $isAdmin )) {
             if ($VMConfig.AdditionalLocalAdmin){
                 WriteInfo "`t Additional Local Admin $($VMConfig.AdditionalLocalAdmin) will be added"
                 $AdditionalLocalAccountXML=AdditionalLocalAccountXML -AdditionalAdminName $VMConfig.AdditionalLocalAdmin -AdminPassword $LabConfig.AdminPassword
-                $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -AdditionalAccount $AdditionalLocalAccountXML -TimeZone $TimeZone
+                $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -LocalAdminGroup $LabConfig.LocalAdminGroup -AdditionalAccount $AdditionalLocalAccountXML -TimeZone $TimeZone
             }else{
                 $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -TimeZone $TimeZone
             }
         }elseif($VMConfig.Win2012Djoin -or $VMConfig.Unattend -eq "DjoinCred"){
             WriteInfo "`t Creating Unattend with win2012-ish domain join"
-            $unattendfile=CreateUnattendFileWin2012 -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -DomainName $Labconfig.DomainName -RunSynchronous $RunSynchronous -TimeZone $TimeZone
+            $unattendfile=CreateUnattendFileWin2012 -ComputerName $Name -LocalAdminUser $LabConfig.LocalAdminUser -AdminPassword $LabConfig.AdminPassword -DomainName $Labconfig.DomainName -RunSynchronous $RunSynchronous -TimeZone $TimeZone
 
         }elseif($VMConfig.Unattend -eq "DjoinBlob" -or -not ($VMConfig.Unattend)){
             WriteInfo "`t Creating Unattend with djoin blob"
@@ -620,22 +631,22 @@ If (!( $isAdmin )) {
         #adding unattend to VHD
         if ($unattendFile){
             WriteInfo "`t Adding unattend to VHD"
-            Mount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -ImagePath $VHDPath -Index 1
-            Use-WindowsUnattend -Path "$PSScriptRoot\Temp\mountdir" -UnattendPath $unattendFile 
-            #&"$PSScriptRoot\Tools\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$PSScriptRoot\Temp\Mountdir
-            #&"$PSScriptRoot\Tools\dism\dism" /image:$PSScriptRoot\Temp\Mountdir /Apply-Unattend:$unattendfile
-            New-item -type directory $PSScriptRoot\Temp\Mountdir\Windows\Panther -ErrorAction Ignore
-            Copy-Item $unattendfile $PSScriptRoot\Temp\Mountdir\Windows\Panther\unattend.xml
+            Mount-WindowsImage -Path "$env:tmp\mountdir" -ImagePath $VHDPath -Index 1
+            Use-WindowsUnattend -Path "$env:tmp\mountdir" -UnattendPath $unattendFile 
+            #&"$PSScriptRoot\Tools\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$env:tmp\mountdir
+            #&"$PSScriptRoot\Tools\dism\dism" /image:$env:tmp\mountdir /Apply-Unattend:$unattendfile
+            New-item -type directory $env:tmp\mountdir\Windows\Panther -ErrorAction Ignore
+            Copy-Item $unattendfile $env:tmp\mountdir\Windows\Panther\unattend.xml
         }
 
         if ($VMConfig.DSCMode -eq 'Pull'){
             WriteInfo "`t Adding metaconfig.mof to VHD"
-            Copy-Item "$PSScriptRoot\temp\dscconfig\$name.meta.mof" -Destination "$PSScriptRoot\Temp\Mountdir\Windows\system32\Configuration\metaconfig.mof"
+            Copy-Item "$PSScriptRoot\temp\dscconfig\$name.meta.mof" -Destination "$env:tmp\mountdir\Windows\system32\Configuration\metaconfig.mof"
         }
 
         if ($unattendFile){
-            Dismount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -Save
-            #&"$PSScriptRoot\Tools\dism\dism" /Unmount-Image /MountDir:$PSScriptRoot\Temp\Mountdir /Commit
+            Dismount-WindowsImage -Path "$env:tmp\mountdir" -Save
+            #&"$PSScriptRoot\Tools\dism\dism" /Unmount-Image /MountDir:$env:tmp\mountdir /Commit
         }
 
         #add toolsdisk
@@ -672,6 +683,18 @@ If (!( $isAdmin )) {
 
     If (!$LabConfig.DefaultOUName){
         $LabConfig.DefaultOUName="Workshop"
+    }
+
+    If (!$LabConfig.LocalAdminUser){
+        $LabConfig.LocalAdminUser="Administrator"
+    }
+
+    If (!$LabConfig.LocalAdminGroup){
+        $LabConfig.LocalAdminUser="Administrators"
+    }
+
+    If (!$LabConfig.GuestServiceInterfaceName){
+        $LabConfig.GuestServiceInterfaceName="Guest Service Interface"
     }
 
     $DN=$null
@@ -896,14 +919,19 @@ If (!( $isAdmin )) {
 
     #Create Mount nd VMs directories
         WriteInfoHighlighted "Creating Mountdir"
-        New-Item "$PSScriptRoot\Temp\MountDir" -ItemType Directory -Force
+        New-Item "$env:tmp\mountdir" -ItemType Directory -Force
 
         WriteInfoHighlighted "Creating VMs dir"
         New-Item "$PSScriptRoot\LAB\VMs" -ItemType Directory -Force
 
     #get path for Tools disk
         WriteInfoHighlighted "Looking for Tools Parent Disks"
-        $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+            # Look for tools vhd in ServerParentPath in case of multiple labs over one set of parentdisks
+            if ($LabConfig.ServerParentPath){
+                $toolsparent=Get-ChildItem $LabConfig.ServerParentPath -Recurse | Where-Object name -eq tools.vhdx
+            }else{
+                $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+            }
         if ($toolsparent -eq $null){
             WriteInfo "`t Tools parent disk not found. Will create one."
             WriteInfoHighlighted "Creating Tools.vhdx"
@@ -1048,7 +1076,7 @@ If (!( $isAdmin )) {
 #region Test DC to come up
 
     #Credentials for Session
-        $username = "$($Labconfig.DomainNetbiosName)\Administrator"
+        $username = "$($Labconfig.DomainNetbiosName)\$($LabConfig.LocalAdminUser)"
         $password = $LabConfig.AdminPassword
         $secstr = New-Object -TypeName System.Security.SecureString
         $password.ToCharArray() | ForEach-Object {$secstr.AppendChar($_)}
@@ -1313,7 +1341,9 @@ If (!( $isAdmin )) {
     WriteInfoHighlighted "Finishing..." 
 
     #a bit cleanup
-        Remove-Item -Path "$PSScriptRoot\temp" -Force -Recurse
+        if (Test-Path "$PSScriptRoot\temp") {
+            Remove-Item -Path "$PSScriptRoot\temp" -Force -Recurse
+        }
         if (Test-Path "$PSScriptRoot\unattend.xml") {
             remove-item "$PSScriptRoot\unattend.xml"
         }
@@ -1341,7 +1371,7 @@ If (!( $isAdmin )) {
     #Enable Guest services on all VMs if integration component if configured
     if ($labconfig.EnableGuestServiceInterface){
         WriteInfo "`t Enabling Guest Service Interface"
-        Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -eq "Running" -or $_.state -eq "Off"} | Enable-VMIntegrationService -Name "Guest Service Interface"
+        Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -eq "Running" -or $_.state -eq "Off"} | Enable-VMIntegrationService -Name $($LabConfig.GuestServiceInterfaceName)
         $TempVMs=Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -ne "Running" -and $_.state -ne "Off"}
         if ($TempVMs){
             WriteInfoHighlighted "`t `t Following VMs cannot be configured, as the state is not running or off"

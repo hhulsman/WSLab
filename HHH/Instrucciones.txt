@@ -1,4 +1,4 @@
-
+﻿
 
 Documents\Visual Studio Code Projects\WSLab:		C�digo oficial, que va a github (HHulsman/WSLab), y desde all� a Microsoft/WSLab
 Documents\Visual Studio Code Projects\WSLab - apuntes:	Este directorio, con instrucciones, y ficheros LabConfig espec�ficos
@@ -70,6 +70,7 @@ Si se va a necesitar VMs con Windows 10:
 	Cuando solicita el nombre del fichero a generar (por defecto sugiere Win10RS5_G2.vhdx, poner: Win10_G2.vhdx (no olvidar la extensi�n)
 
 Ejecutar 3_Deploy.ps1 (o se habrá renombrado a Deploy.ps1?)
+	Cambiar "$PSScriptRoot\Temp\mountdir" por "$env:tmp\Temp\mountdir"
 
 Ejecutar 4_Deploy.ps1 (habilita RDP en DC)
 
@@ -80,3 +81,23 @@ Copiar y ejecutar Scenario.ps1. Esto crea el clúster y S2D
 
 Al final de las pruebas: Cleanup.ps1
 
+
+Para crear un segundo lab:
+- Ejecutar CreateParentDisks.ps1
+- Mover directorio ParentDisks a otra ubicación, y especificar en el parámetro ServerParentPath en LabConfig
+- Salvaguardar directorio Temp, ya que Deploy.ps1 lo destruye
+- Copiar WSLab1 a WSLab2; sólo:
+	- Directorio LAB\DC
+	- Directorio Temp (opcional)
+	- Scripts Deploy.ps1 (3_Deploy.ps1), Cleanup.ps1 y LabConfig.ps1
+- Modificar LabConfig:
+	- Cambiar prefijo WSLab1 por WSLab2
+- Ejecutar todo a partir de Deploy.ps1
+- NO ejecutar Deploy.ps1 para 2 Labs simultáneamente: $env:tmp\Temp\mountdir es el mismo
+
+
+
+Para añadir máquinas Windows 10:
+- Después de ejecutar 2_CreateParentDisks.ps1 se ha creado el fichero CreateParentDisk.ps1 en el directorio ParentDisks.
+- Ejcutarlo, no requiere ningún LabConfig.ps1. Pide la ISO de Windows 10, y la edición de una lista
+- Después se puede incluir la especificación en el fichero LabConfig.ps1, y volver a ejecutar Deploy.ps1. Se crearán automáticamente las VMs adicionales
