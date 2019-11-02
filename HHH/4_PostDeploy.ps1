@@ -1,7 +1,7 @@
 ﻿
 
 #Constantes
-    $DHCPServer = 'Animsa26'
+    # $DHCPServer = 'Animsa26'
     $IPRange    = '172.18.'
 
 
@@ -27,13 +27,13 @@
 
 
 #Get DC Hostname
-    $DCHostName = Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock { [System.Net.Dns]::GetHostByName($env:computerName).HostName }
+    # $DCHostName = Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock { [System.Net.Dns]::GetHostByName($env:computerName).HostName }
 
 
 # Configure Ping, IPv6, RDP, RPC, Windows Upate
     Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock {
 
-            Param( $Domain, $Cred )
+            Param( $Domain, [SecureString] $Cred )
     
             # Disable IPv6
             # Get-NetAdapterBinding -ComponentID ‘ms_tcpip6’ | Disable-NetAdapterBinding -ComponentID ‘ms_tcpip6’ -PassThru
@@ -60,7 +60,7 @@
 
 #Return DC IPAddress
     $DCDhcpAddress = Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock {
-        Get-NetIPAddress -AddressFamily IPv4 | where { $_.IPAddress -match $using:IPRange } 
+        Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -match $using:IPRange } 
     }
 
 
