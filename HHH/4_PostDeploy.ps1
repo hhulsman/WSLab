@@ -1,7 +1,7 @@
 ﻿
 
 #Constantes
-    $DHCPServer = 'Animsa26'
+    # $DHCPServer = 'Animsa26'
     $IPRange    = '172.18.'
 
 
@@ -27,13 +27,13 @@
 
 
 #Get DC Hostname
-    $DCHostName = Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock { [System.Net.Dns]::GetHostByName($env:computerName).HostName }
+    # $DCHostName = Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock { [System.Net.Dns]::GetHostByName($env:computerName).HostName }
 
 
 # Configure Ping, IPv6, RDP, RPC, Windows Upate
     Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock {
 
-            Param( $Domain, $Cred )
+            Param( $Domain, [SecureString] $Cred )
     
             # Disable IPv6
             # Get-NetAdapterBinding -ComponentID ‘ms_tcpip6’ | Disable-NetAdapterBinding -ComponentID ‘ms_tcpip6’ -PassThru
@@ -51,8 +51,8 @@
             # Enable-NetFirewallRule -name RVM-RPCSS-In-TCP,RVM-VDSLDR-In-TCP,RVM-VDS-In-TCP
     
             # Poner actualizaciones de Windows en Automático
-            # Set-Service -Name wuauserv -StartupType Automatic # No es necesario
-            # Cscript c:\windows\system32\scregedit.wsf /AU 4     # Poner en instalación automática. Otros valores: 1 = Manual, 3 = Sólo descarga
+            Set-Service -Name wuauserv -StartupType Automatic     # No es necesario, por si acaso
+            Cscript c:\windows\system32\scregedit.wsf /AU 4       # Poner en instalación automática. Otros valores: 1 = Manual, 3 = Sólo descarga
             # Cscript c:\windows\system32\scregedit.wsf /AU /v    # Ver el estado
     
     }
@@ -60,7 +60,7 @@
 
 #Return DC IPAddress
     $DCDhcpAddress = Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock {
-        Get-NetIPAddress -AddressFamily IPv4 | where { $_.IPAddress -match $using:IPRange } 
+        Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -match $using:IPRange } 
     }
 
 
