@@ -101,3 +101,9 @@ Para añadir máquinas Windows 10:
 - Después de ejecutar 2_CreateParentDisks.ps1 se ha creado el fichero CreateParentDisk.ps1 en el directorio ParentDisks.
 - Ejcutarlo, no requiere ningún LabConfig.ps1. Pide la ISO de Windows 10, y la edición de una lista
 - Después se puede incluir la especificación en el fichero LabConfig.ps1, y volver a ejecutar Deploy.ps1. Se crearán automáticamente las VMs adicionales
+
+
+Configurar Git Triangle Workflow:
+(Pull from microsoft/WSLab (upstream) y push to hhulsman/WSlab (origin)):
+        git config remote.pushdefault origin
+        git config push.default current
