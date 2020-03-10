@@ -1,12 +1,12 @@
 ﻿
 
-Documents\Visual Studio Code Projects\WSLab:		C�digo oficial, que va a github (HHulsman/WSLab), y desde all� a Microsoft/WSLab
-Documents\Visual Studio Code Projects\WSLab - apuntes:	Este directorio, con instrucciones, y ficheros LabConfig espec�ficos
+Documents\Visual Studio Code Projects\WSLab:		Código oficial, que va a github (HHulsman/WSLab)
+Documents\Visual Studio Code Projects\WSLab\HHH:	Código específico HHH
 
 
 Para empezar desde cero:
 
-Tener descargado las ISO's de W2016, W2019, Win10, versiones evaluaci�n, y sus Actualizaciones Cumulativas y Servicing Updates.
+Tener descargado las ISO's de W2016, W2019, Win10, versiones evaluación, y sus Actualizaciones Cumulativas y Servicing Updates.
 
 
 - Descargar proyecto desde https://github.com/microsoft/WSLab.github
@@ -46,12 +46,16 @@ Tener descargado las ISO's de W2016, W2019, Win10, versiones evaluaci�n, y sus
 	
 	
 	
- 
+# Preparar un Lab:
 
-- Copiar desde WSLab - apuntes:
-	- Labconfig HHH.ps1 y sobrescribir LabConfig.ps1 en destino
+- A base de un LabConfig-WSLabx.ps1 en directorio HHH
 
-En caso de que el lab se va a crear en un disco de un cluster de conmutaci�n de error (C:\ClusterVolume):
+- Copiar desde WSLab\HHH a destino (servidor Host):
+	- Todo el contenido de HHH
+	- Renombrar Labconfig-WSLabx.ps1 a LabConfig.ps1 en destino
+	- Borrar resto ficheros LabConfig-WSLabx.ps1 en destino
+
+En caso de que el lab se va a crear en un disco de un cluster de conmutación de error (C:\ClusterVolume):
 	- Modificar en destino (cosas para futuras PRs):
 		- 2_CreateParentDisks.ps1:
 		  Cambiar $psscriptroot\Temp\Mountdir por $env:Temp\Mountdir (todas las ocurrencias)
@@ -59,20 +63,22 @@ En caso de que el lab se va a crear en un disco de un cluster de conmutaci�n d
 	- Lo mismo en 3_Deploy.ps1
 
 Cambiar en 3_Deploy.ps1:
-	En l�nea 1326: Cambiar "Guest Service Interface" por "Interfaz de servicio invitado"
+	En línea 1326: Cambiar "Guest Service Interface" por "Interfaz de servicio invitado"
 
 
 Ejecutar 1_Prereqs.ps1
 Ejecutar 2_CreateParentDisks.ps1
 
 Si se va a necesitar VMs con Windows 10:
-	Ejecutar ParentDisks\CreateParentDisks.ps1
-	Cuando solicita el nombre del fichero a generar (por defecto sugiere Win10RS5_G2.vhdx, poner: Win10_G2.vhdx (no olvidar la extensi�n)
+	Ejecutar ParentDisks\CreateParentDisks.ps1 (fichero creado en el paso 2_CreateParentDisks)
+	Cuando solicita el nombre del fichero a generar (por defecto sugiere Win10RS5_G2.vhdx, poner: Win10_G2.vhdx (no olvidar la extensión)
 
 Ejecutar 3_Deploy.ps1 (o se habrá renombrado a Deploy.ps1?)
-	Cambiar "$PSScriptRoot\Temp\mountdir" por "$env:tmp\Temp\mountdir"
+	Antes, cambiar "$PSScriptRoot\Temp\mountdir" por "$env:tmp\Temp\mountdir"
+	Revisar LabConfig.ps1 por número de servidores y puestos de trabajo
+	Se puede volver a ejecutar este script si posteriormente se quiere añadir más máquinas virtuales
 
-Ejecutar 4_Deploy.ps1 (habilita RDP en DC)
+Ejecutar 4_PostDeploy.ps1 (habilita RDP en DC)
 
 Iniciar sesión en DC
 Abrir Powershell ISE en modo admin

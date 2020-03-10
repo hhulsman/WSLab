@@ -36,5 +36,5 @@ $LabConfig = @{
     }
 }
 
-$LABConfig.VMs += @{ VMName = 'Win10-1'; Configuration = 'Simple'; ParentVHD = 'Win10_G2.vhdx'; MemoryStartupBytes= 1GB; AddToolsVHD=$True; DisableWCF=$True }
-$LABConfig.VMs += @{ VMName = 'Win10-2'; Configuration = 'Simple'; ParentVHD = 'Win10_G2.vhdx'; MemoryStartupBytes= 1GB; AddToolsVHD=$True; DisableWCF=$True }
+#$LABConfig.VMs += @{ VMName = 'Win10-1'; Configuration = 'Simple'; ParentVHD = 'Win10_G2.vhdx'; MemoryStartupBytes= 1GB; AddToolsVHD=$True; DisableWCF=$True }
+#$LABConfig.VMs += @{ VMName = 'Win10-2'; Configuration = 'Simple'; ParentVHD = 'Win10_G2.vhdx'; MemoryStartupBytes= 1GB; AddToolsVHD=$True; DisableWCF=$True }

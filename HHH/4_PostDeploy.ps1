@@ -1,4 +1,6 @@
 ﻿
+# Habilita RDP en DC
+# Devuelve IP address of DC in 172.18 range (Red Animsa)
 
 #Constantes
     # $DHCPServer = 'Animsa26'
