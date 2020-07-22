@@ -1,8 +1,15 @@
-# WSLab Introduction
+# WSLab
+
+<p align="center">
+<a href="https://aka.ms/wslab/download"><img src="https://img.shields.io/static/v1?label=&message=Download+WSLab&color=blue&style=for-the-badge" title="Download WSLab scripts" alt="Download WSLab"></a>
+</p>
+
+## Introduction
 
 <!-- TOC -->
 
-- [WSLab Introduction](#wslab-introduction)
+- [WSLab](#wslab)
+    - [Introduction](#introduction)
     - [Requirements](#requirements)
     - [Scripts](#scripts)
     - [Scenarios](#scenarios)
@@ -56,6 +63,8 @@ Many times happened, that there was an issue that was hard to reproduce. And eve
 ### Sessions
 
 For more session slides navigate to [Slides](https://1drv.ms/u/s!AjTsLJdE37DwtrsnIehxKx7N7XgoBg?e=r1sszn) OneDrive
+
+[![WSLab with Carsten](/Docs/media/Create_great_demo_environments.png)](https://youtu.be/f3EH2NOM2Eg)
 
 [![WSLab in MVPDays](/Docs/media/Monitoring_Azure_Stack_HCI_with_Grafana_thumb.png)](https://youtu.be/0K53z4LMT4U)
 

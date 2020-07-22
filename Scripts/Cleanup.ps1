@@ -13,32 +13,12 @@ If (-not $isAdmin) {
 }
 
 #region Functions
-    function WriteInfo($message){
-        Write-Host $message
-    }
-
-    function WriteInfoHighlighted($message){
-        Write-Host $message -ForegroundColor Cyan
-    }
-
-    function WriteSuccess($message){
-        Write-Host $message -ForegroundColor Green
-    }
-
-    function WriteError($message){
-        Write-Host $message -ForegroundColor Red
-    }
-
-    function WriteErrorAndExit($message){
-        Write-Host $message -ForegroundColor Red
-        Write-Host "Press enter to continue ..."
-        $exit=Read-Host
-        Exit
-    }
-
+. .\0_Shared.ps1 # [!build-include-inline]
 #endregion
 
 #region Do some clenaup
+    #Start
+        $StartDateTime = Get-Date
 
     #load LabConfig
         . "$PSScriptRoot\LabConfig.ps1"
@@ -48,10 +28,10 @@ If (-not $isAdmin) {
         }
 
     #grab all VMs, switches and DC
-        $VMs=get-vm -Name "$($LabConfig.Prefix)*" | Where-Object Name -ne "$($LabConfig.Prefix)DC" -ErrorAction SilentlyContinue | Sort-Object -Property Name
+        $VMs=Get-VM -Name "$($LabConfig.Prefix)*" | Where-Object Name -ne "$($LabConfig.Prefix)DC" -ErrorAction SilentlyContinue | Sort-Object -Property Name
         $vSwitch=Get-VMSwitch "$($labconfig.prefix)$($LabConfig.SwitchName)" -ErrorAction SilentlyContinue
         $extvSwitch=Get-VMSwitch "$($labconfig.prefix)$($LabConfig.SwitchName)-External" -ErrorAction SilentlyContinue
-        $DC=get-vm "$($LabConfig.Prefix)DC" -ErrorAction SilentlyContinue
+        $DC=Get-VM "$($LabConfig.Prefix)DC" -ErrorAction SilentlyContinue
 
     #List VMs, Switches and DC
         If ($VMs){
@@ -80,8 +60,11 @@ If (-not $isAdmin) {
         WriteInfo ""
 
     # This is only needed if you kill deployment script in middle when it mounts VHD into mountdir. 
-        if ((Get-ChildItem -Path $PSScriptRoot\temp\mountdir -ErrorAction SilentlyContinue)){
+        if ((Get-ChildItem -Path "$PSScriptRoot\temp\mountdir" -ErrorAction SilentlyContinue)){
             Dismount-WindowsImage -Path "$PSScriptRoot\temp\mountdir" -Discard -ErrorAction SilentlyContinue
+        }
+        if ((Get-ChildItem -Path "$env:Temp\WSLAbMountdir" -ErrorAction SilentlyContinue)){
+            Dismount-WindowsImage -Path "$env:Temp\WSLAbMountdir" -Discard -ErrorAction SilentlyContinue
         }
 
 #ask for cleanup and clean all if confirmed.
@@ -131,9 +114,19 @@ If (-not $isAdmin) {
             }
 
             #Unzipping configuration files as VM was removed few lines ago-and it deletes vm configuration... 
-                $zipfile= "$PSScriptRoot\LAB\DC\Virtual Machines.zip"
-                $zipoutput="$PSScriptRoot\LAB\DC\"
+                $zipfile = "$PSScriptRoot\LAB\DC\Virtual Machines.zip"
+                $zipoutput = "$PSScriptRoot\LAB\DC\"
                 Microsoft.PowerShell.Archive\Expand-Archive -Path $zipfile -DestinationPath $zipoutput -Force
+
+            # Telemetry
+            if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
+                WriteInfo "Telemetry is set to $(Get-TelemetryLevel) level from $(Get-TelemetryLevelSource)"
+                $metrics = @{
+                    'script.duration' = ((Get-Date) - $StartDateTime).TotalSeconds
+                    'lab.removed.count' = ($VMs | Measure-Object).Count
+                }
+                Send-TelemetryEvent -Event "Cleanup" -Metrics $metrics -NickName $LabConfig.TelemetryNickName | Out-Null
+            }
 
             #finishing    
                 WriteSuccess "Job Done! Press enter to continue ..."

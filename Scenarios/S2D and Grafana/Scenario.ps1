@@ -651,13 +651,13 @@ Invoke-command -computername $GrafanaServerName -scriptblock {
         $CAcert=(Get-CertificationAuthority).certificate
         #download OpenSSL and transfer to GrafanaServer
         $ProgressPreference='SilentlyContinue' #for faster download
-        Invoke-WebRequest -Uri https://indy.fulgan.com/SSL/openssl-1.0.2t-x64_86-win64.zip -OutFile $env:USERPROFILE\Downloads\OpenSSL.zip -UseBasicParsing
+        Invoke-WebRequest -Uri "http://wiki.overbyte.eu/arch/openssl-1.1.1g-win64.zip" -OutFile $env:USERPROFILE\Downloads\OpenSSL.zip -UseBasicParsing
         #transfer OpenSSL to $GrafanaServer
         $GrafanaSession=New-PSSession -ComputerName $GrafanaServerName
         Copy-Item -Path $env:USERPROFILE\Downloads\OpenSSL.zip -Destination $env:USERPROFILE\Downloads\OpenSSL.zip -ToSession $GrafanaSession
         #Unzip OpenSSL
         Invoke-Command -ComputerName $GrafanaServerName -ScriptBlock {
-            Expand-Archive -Path "$env:USERPROFILE\Downloads\OpenSSL.zip" -DestinationPath $env:USERPROFILE\Downloads\OpenSSL -Force
+            Expand-Archive -Path "$env:USERPROFILE\Downloads\OpenSSL.zip" -DestinationPath "$env:USERPROFILE\Downloads\OpenSSL" -Force
         }
         Invoke-Command -ComputerName $GrafanaServerName -ScriptBlock {
             Stop-Service -Name Grafana
@@ -689,9 +689,9 @@ Invoke-command -computername $GrafanaServerName -scriptblock {
                 [System.IO.File]::WriteAllBytes("C:/Program Files/Grafana/conf/Cert.pfx", $bytes)
                 #convert pfx to pem
                     #private
-                    Start-Process -FilePath $env:USERPROFILE\Downloads\OpenSSL\openssl.exe -ArgumentList 'pkcs12 -in "C:/Program Files/Grafana/conf/Cert.pfx" -nocerts -nodes -out "C:/Program Files/Grafana/conf/Private.key" -password pass:""' -Wait
+                    Start-Process -FilePath "$env:USERPROFILE\Downloads\OpenSSL\openssl.exe" -ArgumentList 'pkcs12 -in "C:/Program Files/Grafana/conf/Cert.pfx" -nocerts -nodes -out "C:/Program Files/Grafana/conf/Private.key" -password pass:""' -Wait
                     #public
-                    Start-Process -FilePath $env:USERPROFILE\Downloads\OpenSSL\openssl.exe -ArgumentList 'pkcs12 -in "C:/Program Files/Grafana/conf/Cert.pfx" -clcerts -nokeys -out "C:/Program Files/Grafana/conf/Public.key" -password pass:""' -Wait
+                    Start-Process -FilePath "$env:USERPROFILE\Downloads\OpenSSL\openssl.exe" -ArgumentList 'pkcs12 -in "C:/Program Files/Grafana/conf/Cert.pfx" -clcerts -nokeys -out "C:/Program Files/Grafana/conf/Public.key" -password pass:""' -Wait
                 $GrafanaConfigFileContent=Get-Content -Path "C:\Program Files\Grafana\conf\defaults.ini"
                 $GrafanaConfigFileContent=$GrafanaConfigFileContent.Replace("protocol = http","protocol = https")
                 $GrafanaConfigFileContent=$GrafanaConfigFileContent.Replace("http_port = 3000","http_port = 443")
@@ -722,18 +722,32 @@ New-NetFirewallRule -CimSession $GrafanaServerName `
 #endregion
 
 #region push telegraf agent to nodes
+    $InfluxDBServerURL="http://InfluxDB.corp.contoso.com:8086"
+    $clusters=@("S2D-Cluster")
+
     #expand telegraf
     Expand-Archive -Path "$env:USERPROFILE\Downloads\Telegraf.zip" -DestinationPath "$env:temp" -Force
 
-    #download telegraf configuration from WSLab Github and configure grafana URL
-    $InfluxDBServerURL="http://InfluxDB.corp.contoso.com:8086"
-    $config=invoke-webrequest -usebasicparsing -uri https://raw.githubusercontent.com/Microsoft/WSLab/dev/Scenarios/S2D%20and%20Grafana/telegraf.conf
-    $posh=(invoke-webrequest -usebasicparsing -uri https://raw.githubusercontent.com/Microsoft/WSLab/dev/Scenarios/S2D%20and%20Grafana/telegraf.ps1).content.substring(1)
-    $config=$config.content.substring(1).replace("PlaceInfluxDBUrlHere",$InfluxDBServerURL) #| Out-File -FilePath "$env:temp\telegraf\telegraf.conf" -Encoding UTF8 -Force
+    #provide your telegraf and config
+    $posh = Get-Content -Path $env:userprofile\Downloads\telegraf.ps1 -ErrorAction Ignore
+    $config =  Get-Content -Path $env:userprofile\Downloads\telegraf.conf -ErrorAction Ignore
+
+    #or download telegraf configuration from WSLab Github and configure grafana URL
+    if (!$config -or !$posh){
+        $config=(invoke-webrequest -usebasicparsing -uri https://raw.githubusercontent.com/Microsoft/WSLab/dev/Scenarios/S2D%20and%20Grafana/telegraf.conf).content
+        $posh=(invoke-webrequest -usebasicparsing -uri https://raw.githubusercontent.com/Microsoft/WSLab/dev/Scenarios/S2D%20and%20Grafana/telegraf.ps1).content.substring(1)
+        #save config and posh to Downloads folder
+        $posh | out-file -Filepath $env:userprofile\Downloads\telegraf.ps1 -force -Encoding UTF8
+        $config | out-file -Filepath $env:userprofile\Downloads\telegraf.conf -force -Encoding UTF8
+    }
+
+    #replace string "PlaceInfluxDBUrlHere" with DB URL
+    $config=$config.replace("PlaceInfluxDBUrlHere",$InfluxDBServerURL)
+
     <#
     #reuse default telegraf config and replace server name in config
     $config=get-content -path "$env:temp\telegraf\telegraf.conf"
-    $config=$config.replace("127.0.0.1","grafana.corp.contoso.com")
+    $config=$config.replace("127.0.0.1","$InfluxDBServerURL")
     $config | Set-Content -Path "$env:temp\telegraf\telegraf.conf" -Encoding UTF8
     #>
 
@@ -769,9 +783,12 @@ New-NetFirewallRule -CimSession $GrafanaServerName `
     <#
     $clusters=@("S2D-Cluster")
     $InfluxDBServerURL="http://InfluxDB.corp.contoso.com:8086"
-    $config=invoke-webrequest -usebasicparsing -uri https://raw.githubusercontent.com/Microsoft/WSLab/dev/Scenarios/S2D%20and%20Grafana/telegraf.conf
-    $posh=(invoke-webrequest -usebasicparsing -uri https://raw.githubusercontent.com/Microsoft/WSLab/dev/Scenarios/S2D%20and%20Grafana/telegraf.ps1).content.substring(1)
-    $config=$config.content.substring(1).replace("PlaceInfluxDBUrlHere",$InfluxDBServerURL) #| Out-File -FilePath "$env:temp\telegraf\telegraf.conf" -Encoding UTF8 -Force
+
+    #load posh and config from downloads
+    $posh = Get-Content -Path $env:userprofile\Downloads\telegraf.ps1
+    $config =  Get-Content -Path $env:userprofile\Downloads\telegraf.conf
+    #replace string with DB URL
+    $config=$config.replace("PlaceInfluxDBUrlHere",$InfluxDBServerURL)
 
     foreach ($Cluster in $Clusters){
         $servers=(Get-ClusterNode -Cluster $Cluster).Name
@@ -786,4 +803,13 @@ New-NetFirewallRule -CimSession $GrafanaServerName `
     }
     #>
  
+#endregion
+
+#region download and run Influx DB Studio https://github.com/CymaticLabs/InfluxDBStudio
+Invoke-WebRequest -UseBasicParsing -uri https://github.com/CymaticLabs/InfluxDBStudio/releases/download/v0.2.0-beta.1/InfluxDBStudio-0.2.0.zip -OutFile $env:userprofile\Downloads\InfluxDBStudio-0.2.0.zip
+#unzip
+Expand-Archive -Path $env:userprofile\Downloads\InfluxDBStudio-0.2.0.zip -DestinationPath $env:userprofile\Downloads\ -Force
+#run
+& "$env:userprofile\Downloads\InfluxDBStudio-0.2.0\InfluxDBStudio.exe"
+
 #endregion

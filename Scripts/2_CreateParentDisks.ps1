@@ -13,32 +13,7 @@ If (-not $isAdmin) {
 }
 
 #region Functions
-
-    function WriteInfo($message){
-        Write-Host $message
-    }
-
-    function WriteInfoHighlighted($message){
-        Write-Host $message -ForegroundColor Cyan
-    }
-
-    function WriteSuccess($message)
-    {
-        Write-Host $message -ForegroundColor Green
-    }
-
-    function WriteError($message)
-    {
-        Write-Host $message -ForegroundColor Red
-    }
-
-    function WriteErrorAndExit($message){
-        Write-Host $message -ForegroundColor Red
-        Write-Host "Press enter to continue ..."
-        Stop-Transcript
-        Read-Host | Out-Null
-        Exit
-    }
+. .\0_Shared.ps1 # [!build-include-inline]
 
     #Create Unattend for VHD 
     Function CreateUnattendFileVHD{
@@ -81,6 +56,10 @@ If (-not $isAdmin) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
+        <OEMInformation>
+          <SupportProvider>WSLab</SupportProvider>
+          <SupportURL>https://aka.ms/wslab</SupportURL>
+        </OEMInformation>
         <RegisteredOwner>PFE</RegisteredOwner>
         <RegisteredOrganization>Contoso</RegisteredOrganization>
     </component>
@@ -116,11 +95,26 @@ If (-not $isAdmin) {
 #region Initialization
     #Start Log
         Start-Transcript -Path "$PSScriptRoot\CreateParentDisks.log"
-        $StartDateTime = get-date
+        $StartDateTime = Get-Date
         WriteInfo "Script started at $StartDateTime"
+        WriteInfo "`nWSLab Version $wslabVersion"
 
     #Load LabConfig....
         . "$PSScriptRoot\LabConfig.ps1"
+
+    # Telemetry
+        if(-not (Get-TelemetryLevel)) {
+            $telemetryLevel = Read-TelemetryLevel
+            $LabConfig.TelemetryLevel = $telemetryLevel
+            $promptShown = $true
+        }
+
+        if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
+            if(-not $promptShown) {
+                WriteInfo "Telemetry is set to $(Get-TelemetryLevel) level from $(Get-TelemetryLevelSource)"
+            }
+            Send-TelemetryEvent -Event "CreateParentDisks.Start" -NickName $LabConfig.TelemetryNickName | Out-Null
+        }
 
     #create variables if not already in LabConfig
         If (!$LabConfig.DomainNetbiosName){
@@ -157,7 +151,7 @@ If (-not $isAdmin) {
         $DCName='DC'
 
     #Grab TimeZone
-    $TimeZone=(Get-TimeZone).id
+    $TimeZone = (Get-TimeZone).id
 
     #Grab Installation type
     $WindowsInstallationType=Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' -Name InstallationType
@@ -235,14 +229,32 @@ If (-not $isAdmin) {
         }
 
     #Check if at least 2GB (+200Mb just to be sure) memory is available
-    WriteInfoHighlighted "Checking if at least 2GB RAM is available"
-    $MemoryAvailableMB=(Get-Ciminstance Win32_OperatingSystem).FreePhysicalMemory/1KB
-    if ($MemoryAvailableMB -gt (2048+200)){
-        WriteSuccess "`t $("{0:n0}" -f $MemoryAvailableMB) MB RAM Available"
-    }else{
-        WriteErrorAndExit "`t Please make sure you have at least 2 GB available memory. Exiting"
-    }
+        WriteInfoHighlighted "Checking if at least 2GB RAM is available"
+        $MemoryAvailableMB=(Get-Ciminstance Win32_OperatingSystem).FreePhysicalMemory/1KB
+        if ($MemoryAvailableMB -gt (2048+200)){
+            WriteSuccess "`t $("{0:n0}" -f $MemoryAvailableMB) MB RAM Available"
+        }else{
+            WriteErrorAndExit "`t Please make sure you have at least 2 GB available memory. Exiting"
+        }
 
+    #check if filesystem on volume is NTFS or ReFS
+    WriteInfoHighlighted "Checking if volume filesystem is NTFS or ReFS"
+    $driveletter=$PSScriptRoot -split ":" | Select-Object -First 1
+    if ($PSScriptRoot -like "c:\ClusterStorage*"){
+        WriteSuccess "`t Volume Cluster Shared Volume. Mountdir will be $env:Temp\WSLAbMountdir" 
+        $mountdir="$env:Temp\WSLAbMountdir"
+        $VolumeFileSystem="CSVFS"
+    }else{
+        $mountdir="$PSScriptRoot\Temp\MountDir"
+        $VolumeFileSystem=(Get-Volume -DriveLetter $driveletter).FileSystemType
+        if ($VolumeFileSystem -match "NTFS"){
+            WriteSuccess "`t Volume filesystem is $VolumeFileSystem"
+        }elseif ($VolumeFileSystem -match "ReFS") {
+            WriteSuccess "`t Volume filesystem is $VolumeFileSystem"
+        }else {
+            WriteErrorAndExit "`t Volume filesystem is $VolumeFileSystem. Must be NTFS or ReFS. Exiting"
+        }
+    }
 #endregion
 
 #region Ask for ISO images and Cumulative updates
@@ -296,6 +308,9 @@ If (-not $isAdmin) {
             $ISOServer | Dismount-DiskImage
             WriteErrorAndExit "Please provide Windows Server 2016 and newer. Exitting."
         }
+    #Check ISO Language
+        $imageInfo=(Get-WindowsImage -ImagePath "$($ServerMediaDriveLetter):\sources\install.wim" -Index 4)
+        $OSLanguage=$imageInfo.Languages | Select-Object -First 1
 
 #Grab packages
     #grab server packages
@@ -310,8 +325,8 @@ If (-not $isAdmin) {
             WriteInfoHighlighted "Please select Windows Server Updates (*.msu). Click Cancel if you don't want any."
             [reflection.assembly]::loadwithpartialname("System.Windows.Forms")
             $msupackages = New-Object System.Windows.Forms.OpenFileDialog -Property @{
-                Multiselect = $true;
-                Title="Please select Windows Server Updates (*.msu). Click Cancel if you don't want any."
+                Multiselect = $true;
+                Title = "Please select Windows Server Updates (*.msu). Click Cancel if you don't want any."
             }
             $msupackages.Filter = "msu files (*.msu)|*.msu|All files (*.*)|*.*" 
             If($msupackages.ShowDialog() -eq "OK"){
@@ -332,11 +347,13 @@ If (-not $isAdmin) {
     if ($BuildNumber -eq 14393){
         #Windows Server 2016
         $ServerVHDs += @{
+            Kind = "Full"
             Edition="4" 
             VHDName="Win2016_G2.vhdx"
             Size=60GB
         }
         $ServerVHDs += @{
+            Kind = "Core"
             Edition="3" 
             VHDName="Win2016Core_G2.vhdx"
             Size=30GB
@@ -352,17 +369,20 @@ If (-not $isAdmin) {
     }elseif ($BuildNumber -eq 17763){
         #Windows Server 2019
         $ServerVHDs += @{
+            Kind = "Full"
             Edition="4" 
             VHDName="Win2019_G2.vhdx"
             Size=60GB
         }
         $ServerVHDs += @{
+            Kind = "Core"
             Edition="3" 
             VHDName="Win2019Core_G2.vhdx"
             Size=30GB
         }
     }elseif ($BuildNumber -ge 17744 -and $SAC){
         $ServerVHDs += @{
+            Kind = "Core"
             Edition="2" 
             VHDName="WinSrvInsiderCore_$BuildNumber.vhdx"
             Size=30GB
@@ -374,11 +394,13 @@ If (-not $isAdmin) {
     }elseif ($BuildNumber -ge 17744){
         #Windows Sever Insider
         $ServerVHDs += @{
+            Kind = "Full"
             Edition="4" 
             VHDName="WinSrvInsider_$BuildNumber.vhdx"
             Size=60GB
         }
         $ServerVHDs += @{
+            Kind = "Core"
             Edition="3" 
             VHDName="WinSrvInsiderCore_$BuildNumber.vhdx"
             Size=30GB
@@ -419,7 +441,14 @@ If (-not $isAdmin) {
 
       #Create Servers Parent VHDs
         WriteInfoHighlighted "Creating Server Parent disk(s)"
+        $vhdStatusInfo = @{}
         foreach ($ServerVHD in $ServerVHDs){
+            $vhdStatus = @{
+                Kind = $ServerVHD.Kind
+                Name = $ServerVHD.VHDName
+                AlreadyExists = $false
+                BuildStartDate = Get-Date
+            }
             if ($serverVHD.Edition -notlike "*nano"){
                 if (!(Test-Path "$PSScriptRoot\ParentDisks\$($ServerVHD.VHDName)")){
                     WriteInfo "`t Creating Server Parent $($ServerVHD.VHDName)"
@@ -442,6 +471,7 @@ If (-not $isAdmin) {
                         Convert-WindowsImage -SourcePath "$($ServerMediaDriveLetter):\sources\install.wim" -Edition $serverVHD.Edition -VHDPath "$PSScriptRoot\ParentDisks\$($ServerVHD.VHDName)" -SizeBytes $serverVHD.Size -VHDFormat VHDX -DiskLayout UEFI
                     }
                 }else{
+                    $vhdStatus.AlreadyExists = $true
                     WriteSuccess "`t Server Parent $($ServerVHD.VHDName) found, skipping creation"
                 }
             }
@@ -463,9 +493,18 @@ If (-not $isAdmin) {
                     WriteSuccess "`t Server Parent $($ServerVHD.VHDName) found, skipping creation"
                 }
             }
+            $vhdStatus.BuildEndDate = Get-Date
+
+            $vhdStatusInfo[$vhdStatus.Kind] = $vhdStatus
         }
 
     #create Tools VHDX from .\Temp\ToolsVHD
+        $toolsVhdStatus = @{
+            Kind = "Tools"
+            Name = "tools.vhdx"
+            AlreadyExists = $false
+            BuildStartDate = Get-Date
+        }
         if (!(Test-Path "$PSScriptRoot\ParentDisks\tools.vhdx")){
             WriteInfoHighlighted "Creating Tools.vhdx"
             $toolsVHD=New-VHD -Path "$PSScriptRoot\ParentDisks\tools.vhdx" -SizeBytes 30GB -Dynamic
@@ -489,15 +528,21 @@ If (-not $isAdmin) {
             }
 
             Dismount-VHD $vhddisk.Number
+
+            $toolsVhdStatus.BuildEndDate = Get-Date
         }else{
+            $toolsVhdStatus.AlreadyExists = $true
             WriteSuccess "`t Tools.vhdx found in Parent Disks, skipping creation"
-            $toolsVHD=Get-VHD -Path "$PSScriptRoot\ParentDisks\tools.vhdx"
+            $toolsVHD = Get-VHD -Path "$PSScriptRoot\ParentDisks\tools.vhdx"
         }
+
+        $vhdStatusInfo[$toolsVhdStatus.Kind] = $toolsVhdStatus
 #endregion
 
 #region Hydrate DC
     if (-not $DCFilesExists){
         WriteInfoHighlighted "Starting DC Hydration"
+        $dcHydrationStartTime = Get-Date
 
         $vhdpath="$PSScriptRoot\LAB\$DCName\Virtual Hard Disks\$DCName.vhdx"
         $VMPath="$PSScriptRoot\LAB\"
@@ -540,21 +585,21 @@ If (-not $isAdmin) {
 
         #Apply Unattend to VM
             WriteInfoHighlighted "`t Applying Unattend and copying Powershell DSC Modules"
-            if (Test-Path "$PSScriptRoot\Temp\mountdir"){
-                Remove-Item -Path "$PSScriptRoot\Temp\mountdir\" -Recurse -Force
+            if (Test-Path $mountdir){
+                Remove-Item -Path $mountdir -Recurse -Force
             }
             if (Test-Path "$PSScriptRoot\Temp\unattend"){
                 Remove-Item -Path "$PSScriptRoot\Temp\unattend.xml"
             }
             $unattendfile=CreateUnattendFileVHD -Computername $DCName -AdminPassword $AdminPassword -path "$PSScriptRoot\temp\" -TimeZone $TimeZone
-            New-item -type directory -Path $PSScriptRoot\Temp\mountdir -force
-            Mount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -ImagePath $VHDPath -Index 1
-            Use-WindowsUnattend -Path "$PSScriptRoot\Temp\mountdir" -UnattendPath $unattendFile 
-            #&"$PSScriptRoot\Temp\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$PSScriptRoot\Temp\mountdir
-            #&"$PSScriptRoot\Temp\dism\dism" /image:$PSScriptRoot\Temp\mountdir /Apply-Unattend:$unattendfile
-            New-item -type directory -Path "$PSScriptRoot\Temp\mountdir\Windows\Panther" -force
-            Copy-Item -Path $unattendfile -Destination "$PSScriptRoot\Temp\mountdir\Windows\Panther\unattend.xml" -force
-            Copy-Item -Path "$PSScriptRoot\Temp\DSC\*" -Destination "$PSScriptRoot\Temp\mountdir\Program Files\WindowsPowerShell\Modules\" -Recurse -force
+            New-item -type directory -Path $mountdir -force
+            Mount-WindowsImage -Path $mountdir -ImagePath $VHDPath -Index 1
+            Use-WindowsUnattend -Path $mountdir -UnattendPath $unattendFile 
+            #&"$PSScriptRoot\Temp\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$mountdir
+            #&"$PSScriptRoot\Temp\dism\dism" /image:$mountdir /Apply-Unattend:$unattendfile
+            New-item -type directory -Path "$mountdir\Windows\Panther" -force
+            Copy-Item -Path $unattendfile -Destination "$mountdir\Windows\Panther\unattend.xml" -force
+            Copy-Item -Path "$PSScriptRoot\Temp\DSC\*" -Destination "$mountdir\Program Files\WindowsPowerShell\Modules\" -Recurse -force
 
         #Create credentials for DSC
 
@@ -884,13 +929,13 @@ If (-not $isAdmin) {
         #copy DSC MOF files to DC
             WriteInfoHighlighted "`t Copying DSC configurations (pending.mof and metaconfig.mof)"
             New-item -type directory -Path "$PSScriptRoot\Temp\config" -ErrorAction Ignore
-            Copy-Item -path "$PSScriptRoot\Temp\config\dc.mof"      -Destination "$PSScriptRoot\Temp\mountdir\Windows\system32\Configuration\pending.mof"
-            Copy-Item -Path "$PSScriptRoot\Temp\config\dc.meta.mof" -Destination "$PSScriptRoot\Temp\mountdir\Windows\system32\Configuration\metaconfig.mof"
+            Copy-Item -path "$PSScriptRoot\Temp\config\dc.mof"      -Destination "$mountdir\Windows\system32\Configuration\pending.mof"
+            Copy-Item -Path "$PSScriptRoot\Temp\config\dc.meta.mof" -Destination "$mountdir\Windows\system32\Configuration\metaconfig.mof"
 
         #close VHD and apply changes
             WriteInfoHighlighted "`t Applying changes to VHD"
-            Dismount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -Save
-            #&"$PSScriptRoot\Temp\dism\dism" /Unmount-Image /MountDir:$PSScriptRoot\Temp\mountdir /Commit
+            Dismount-WindowsImage -Path $mountdir -Save
+            #&"$PSScriptRoot\Temp\dism\dism" /Unmount-Image /MountDir:$mountdir /Commit
 
         #Start DC VM and wait for configuration
             WriteInfoHighlighted "`t Starting DC"
@@ -988,6 +1033,8 @@ If (-not $isAdmin) {
             if (($LabConfig.InstallSCVMM -eq "Yes") -or ($LabConfig.InstallSCVMM -eq "SQL") -or ($LabConfig.InstallSCVMM -eq "ADK") -or ($LabConfig.InstallSCVMM -eq "Prereqs")){
                 $DC | Get-VMHardDiskDrive | Where-Object path -eq $toolsVHD.Path | Remove-VMHardDiskDrive
             }
+
+            $dcHydrationEndTime = Get-Date
     }
 #endregion
 
@@ -1030,6 +1077,7 @@ If (-not $isAdmin) {
     WriteInfoHighlighted "Do you want to cleanup unnecessary files and folders?"
     WriteInfo "`t (.\Temp\ 1_Prereq.ps1 2_CreateParentDisks.ps1 and rename 3_deploy to just deploy)"
     If ((Read-host "`t Please type Y or N") -like "*Y"){
+        $renamed = $true
         WriteInfo "`t `t Cleaning unnecessary items"
         Remove-Item -Path "$PSScriptRoot\temp" -Force -Recurse 
         "$PSScriptRoot\Temp","$PSScriptRoot\1_Prereq.ps1","$PSScriptRoot\2_CreateParentDisks.ps1" | ForEach-Object {
@@ -1039,7 +1087,67 @@ If (-not $isAdmin) {
         WriteInfo "`t `t `t Renaming $PSScriptRoot\3_Deploy.ps1 to Deploy.ps1"
         Rename-Item -Path "$PSScriptRoot\3_Deploy.ps1" -NewName "Deploy.ps1" -ErrorAction SilentlyContinue
     }else{
+        $renamed = $false
         WriteInfo "`t You did not type Y, skipping cleanup"
+    }
+
+    # Telemetry Event
+    if($LabConfig.TelemetryLevel -in $TelemetryEnabledLevels) {
+        WriteInfo "Sending telemetry info"
+        $metrics = @{
+            'script.duration' = ((Get-Date) - $StartDateTime).TotalSeconds
+            'msu.count' = ($packages | Measure-Object).Count
+            'memory.available' = [Math]::Round($MemoryAvailableMB, 0)
+        }
+        if(-not $DCFilesExists) {
+            $metrics['dc.duration'] = ($dcHydrationEndTime - $dcHydrationEndTime).TotalSeconds
+        }
+
+        $properties = @{
+            'dc.exists' = [int]$DCFilesExists
+            'dc.edition' = $LabConfig.DCEdition
+            'dc.build' = $BuildNumber
+            'dc.language' = $OSLanguage
+            'lab.scriptsRenamed' = $renamed
+            'lab.installScvmm' = $LabConfig.InstallSCVMM
+            'os.windowsInstallationType' = $WindowsInstallationType
+            'os.tz' = $TimeZone
+        }
+        $events = @()
+
+        # First for parent disks
+        foreach($key in $vhdStatusInfo.Keys) {
+            $status = $vhdStatusInfo[$key]
+            $buildDuration = 0
+            if(-not $status.AlreadyExists) {
+                $buildDuration = ($status.BuildEndDate - $status.BuildStartDate).TotalSeconds
+            }
+            $key = $key.ToLower()
+
+            $properties["vhd.$($key).exists"] = [int]$status.AlreadyExists
+            $properties["vhd.$($key).name"] = $status.Name
+            if($buildDuration -gt 0) {
+                $metrics["vhd.$($key).duration"] = $buildDuration
+            }
+
+            if($status.AlreadyExists) {
+               continue # verbose events are interesting only when creating a new vhds
+            }
+
+            $vhdMetrics = @{
+                'vhd.duration' = $buildDuration
+            }
+            $vhdProperties = @{
+                'vhd.name' = $status.Name
+                'vhd.kind' = $status.Kind
+            }
+            $events += New-TelemetryEvent -Event "CreateParentDisks.Vhd" -Metrics $vhdMetrics -Properties $vhdProperties -NickName $LabConfig.TelemetryNickName 
+        }
+
+        # and one overall
+        $events += New-TelemetryEvent -Event "CreateParentDisks.End" -Metrics $metrics -Properties $properties -NickName $LabConfig.TelemetryNickName 
+
+        Send-TelemetryEvents -Events $events | Out-Null
     }
 
     Stop-Transcript

@@ -1,67 +1,91 @@
-﻿Function Send-JsonOverTcp {
-    param ( [ValidateNotNullOrEmpty()] 
-    [string] $Ip, 
-    [int] $Port, 
-    $JsonObject) 
-    $JsonString = $JsonObject -replace "`n",' ' -replace "`r",' ' -replace ' ',''
-    $Socket = New-Object System.Net.Sockets.TCPClient($Ip,$Port) 
-    $Stream = $Socket.GetStream() 
-    $Writer = New-Object System.IO.StreamWriter($Stream)
-    $Writer.WriteLine($JsonString)
-    $Writer.Flush()
-    $Stream.Close()
-    $Socket.Close()
+﻿$URLInfluxDB ="http://InfluxDB:8086"
+$DatabaseName="telegraf"
+$ClusterName = (get-cluster).name
+
+#Grab volumes owned by current node
+$csvs = Get-ClusterSharedVolume | Where-Object {$_.OwnerNode.Name -eq $env:COMPUTERNAME}
+foreach ( $csv in $csvs ) {
+    $csvinfos = $csv | Select-Object -Property Name -ExpandProperty SharedVolumeInfo
+    foreach ( $csvinfo in $csvinfos ) {
+        $data = $csv.Name
+        $name = ($data.split("(")[1]).split(")")[0]
+        $obj = New-Object PSObject -Property @{
+            FriendlyName = $name
+            Path         = $csvinfo.FriendlyVolumeName
+            Size         = $csvinfo.Partition.Size
+            FreeSpace    = $csvinfo.Partition.FreeSpace
+            UsedSpace    = $csvinfo.Partition.UsedSpace
+            PercentFree  = $csvinfo.Partition.PercentFree
+        }
+    }
+    $csvinfo = $obj | Select-Object FriendlyName, Path, @{ Label = "Size" ; Expression = { ($_.Size /1GB) } }, @{ Label = "FreeSpace" ; Expression = { ($_.FreeSpace / 1GB) } }, @{ Label = "UsedSpace" ; Expression = { ($_.UsedSpace /1GB) } }, @{ Label = "PercentFree" ; Expression = { ($_.PercentFree) } } 
+    $csvinfo | ConvertTo-Metric -Measure ps_csv_info -MetricProperty Size, FreeSpace, UsedSpace, PercentFree -TagProperty FriendlyName, Path -Tags @{ClusterName = $ClusterName} | Write-Influx -Database $DatabaseName -Server $URLInfluxDB
 }
 
-$csvs = Get-ClusterSharedVolume
+#grab all Cluster and non-cluster disks owned by current node and send health stat
+$vdisks=@()
+$vdisks+=(Get-ClusterResource | Where-Object ResourceType -eq "Physical Disk" | Where-Object {$_.OwnerNode.Name -eq $env:COMPUTERNAME}).Name
+$vdisks+=(Get-ClusterSharedVolume | Where-Object {$_.OwnerNode.Name -eq $env:COMPUTERNAME}).Name
+$vdisks=ForEach ($vdisk in $vdisks) {if ($vdisk){$vdisk.trim("Cluster Virtual Disk (").trim(")")}}
+$vdisks=ForEach ($vdisk in $vdisks) {Get-VirtualDisk -FriendlyName $vdisk}
 
-#Get CSV Info
-    foreach ($csv in $csvs ){
-        $csvinfos = $csv | Select-Object -Property Name -ExpandProperty SharedVolumeInfo
-        foreach ( $csvinfo in $csvinfos ){
-            $data = $csv.Name
-            $name = ($data.split("(")[1]).split(")")[0]
-            $obj = New-Object PSObject -Property @{
-                FriendlyName        = $name
-                Path        = $csvinfo.FriendlyVolumeName
-                Size        = $csvinfo.Partition.Size
-                FreeSpace   = $csvinfo.Partition.FreeSpace
-                UsedSpace   = $csvinfo.Partition.UsedSpace
-                PercentFree = $csvinfo.Partition.PercentFree
+foreach ( $Vdisk in $VDisks ) {
+    If ( $VDisk.HealthStatus -like "Healthy") {
+        $HealthNum = 1
+    }
+    elseif ( $VDisk.HealthStatus -like "Warning") {
+        $HealthNum = 2
+    }
+    else {
+        $HealthNum = 3
+    }
+    $VDiskinfo = Get-VirtualDisk -FriendlyName $Vdisk.FriendlyName | Select-Object FriendlyName, ResiliencySettingName, OperationalStatus, HealthStatus, @{ Label = "HealthNum" ; Expression = { ($HeatlyNum) } }, @{ Label = "Size" ; Expression = { ($_.Size /1GB) } }, @{ Label = "AllocatedSize" ; Expression = { ($_.AllocatedSize /1GB) } }, @{ Label = "StorageEfficiency" ; Expression = { (($_.Size * 100) / $_.FootprintOnPool) } }, @{ Label = "FootprintOnPool" ; Expression = { ($_.FootprintOnPool /1GB) } } 
+    $VDiskinfo | ConvertTo-Metric -Measure ps_vdisk_info -MetricProperty HealthNum, Size, AllocatedSize, StorageEfficiency, FootprintOnPool -TagProperty FriendlyName, ResiliencySettingName, HealthStatus -Tags @{ClusterName = $ClusterName} | Write-Influx -Database $DatabaseName -Server $URLInfluxDB
+}
+
+#grab storage jobs if node is owner of cluster core resources (to avoid same data in DB)
+if ((Get-ClusterGroup -Name "Cluster Group").OwnerNode.Name -eq $env:COMPUTERNAME){
+    Get-storagejob | ConvertTo-Metric -Measure ps_storage_job -TagProperty name, JobState -MetricProperty PercentComplete,BytesProcessed,BytesTotal -Tags @{ClusterName = $ClusterName} | Write-Influx -Database $DatabaseName  -Server $URLInfluxDB
+    #Get-clusternode | ConvertTo-Metric -Measure ps_cluster_state -TagProperty name, state -MetricProperty id | Write-Influx -Database $DatabaseName  -Server $URLInfluxDB
+    Get-WmiObject -Class MSCluster_Node -namespace "root\mscluster" | ConvertTo-Metric -Measure ps_cluster_state -TagProperty Name -MetricProperty State -Tags @{ClusterName = $ClusterName} | Write-Influx -Database $DatabaseName  -Server $URLInfluxDB
+    #Get-StorageQoSVolume | Select-Object @{ Label = "Mountpoint" ; Expression = { (($_.Mountpoint.split("\\"))[2]) } }, IOPS, Latency, Bandwidth | ConvertTo-Metric -Measure ps_storage_qos_volume -TagProperty Mountpoint -MetricProperty IOPS,Latency,Bandwidth -Tags @{ClusterName = $ClusterName} | Write-Influx -Database $DatabaseName  -Server $URLInfluxDB
+    #Get-StorageQosFlow | Select-Object InitiatorName, @{Expression = { $_.InitiatorNodeName.Substring(0, $_.InitiatorNodeName.IndexOf('.')) }; Label = "InitiatorNodeName" }, StorageNodeIOPs | ConvertTo-Metric -Measure ps_storage_qos_vm -TagProperty InitiatorName,InitiatorNodeName -MetricProperty StorageNodeIOPs -Tags @{ClusterName = $ClusterName} | Write-Influx -Database $DatabaseName  -Server $URLInfluxDB
+}
+
+#Send VM perf metrics
+    if (((get-date).second) -in 0..10) {
+        $VMtable = get-vm | Get-ClusterPerf | Select-Object ObjectDescription, MetricId, Value
+        $i = 1
+        $hash = $null
+        $hash = @{ }
+        foreach ($values in $VMtable) {  
+            $vmname = $values.ObjectDescription.split([char]0x0020, 1) | Select-Object -last 1
+            $metric = $values.MetricId.split([char]0x002C, 1) | Select-Object -first 1
+            $currentvalue = [math]::Round(($values.Value), 0)  
+            If ($i -le 18) { $hash.add($metric, $currentvalue) }
+            $i++
+            If ($i -eq 19) {
+                $i = 1
+                Write-Influx -Database $DatabaseName -Server $URLInfluxDB -Measure ps_vm -Metrics $hash -Tags @{VMName = $vmname ; clustername = $ClusterName}
+                $hash = $null
+                $hash = @{ }
             }
         }
-       $csvinfo = $obj |Select-Object FriendlyName,Path,@{ Label = "Size(GB)" ; Expression = { ($_.Size/1024/1024/1024) } },@{ Label = "FreeSpace(GB)" ; Expression = { ($_.FreeSpace/1024/1024/1024) } },@{ Label = "UsedSpace(GB)" ; Expression = {  ($_.UsedSpace/1024/1024/1024) } },@{ Label = "PercentFree" ; Expression = {  ($_.PercentFree) }} | ConvertTo-Json
-       Send-JsonOverTcp 127.0.0.1 8094 "$csvinfo"
     }
- 
 
-$VDisks = Get-VirtualDisk 
-
-foreach ( $Vdisk in $VDisks ){
-    # Convert HealtStatus To Num
-    If ( $VDisk.HealthStatus -like "Healthy"){
-        $HeatlyNum = 1
-    } elseif ( $VDisk.HealthStatus -like "Warning") {
-        $HeatlyNum = 2
+#send S2D Metrics if owner of cluster core resources
+    ## S2D Metrics
+    if ((Get-ClusterGroup -Name "Cluster Group").OwnerNode.Name -eq $env:COMPUTERNAME){
+        if (((get-date).second) -in 30..40) {
+            $S2DPerfs = Get-ClusterPerf | Select-Object MetricID, value
+            $hash = $null
+            $hash = @{ }
+            $hash.add("host", $env:computername)
+            foreach ($S2DPerf in $S2DPerfs) {
+                $metric = $S2DPerf.MetricId.split([char]0x002C, 1) | Select-Object -first 1
+                $currentvalue = $S2DPerf.Value
+                $hash.add($metric, $currentvalue)
+            }
+            Write-Influx -Database $DatabaseName -Server $URLInfluxDB -Measure ps_s2d -Tags @{clustername = $ClusterName } -Metrics $hash
+        }
     }
-    $VDiskinfo = Get-VirtualDisk -FriendlyName $Vdisk.FriendlyName | Select-Object FriendlyName,ResiliencySettingName,OperationalStatus,HealthStatus,@{ Label = "HealthNum" ; Expression = {  ($HeatlyNum) } },@{ Label = "Size(GB)" ; Expression = {  ($_.Size/1024/1024/1024) } },@{ Label = "AllocatedSize(GB)" ; Expression = {  ($_.AllocatedSize/1024/1024/1024) } },@{ Label = "StorageEfficiency" ; Expression = {  (($_.Size*100)/$_.FootprintOnPool) } },@{ Label = "FootprintOnPool (GB)" ; Expression = {  ($_.FootprintOnPool/1024/1024/1024) } } | ConvertTo-Json
-
-    Send-JsonOverTcp 127.0.0.1 8094 "$VDiskinfo"
-    #Write-Host $Vdisk
-}
-
-$Jobs =  get-storagejob | Select-Object name,JobState,PercentComplete | ConvertTo-Json
-
-Send-JsonOverTcp 127.0.0.1 8095 "$Jobs"
-
-$statusclust = get-clusternode | Select-Object name,state| ConvertTo-Json
-
-Send-JsonOverTcp 127.0.0.1 8096 "$statusclust"
-
-$qos = Get-StorageQoSVolume | Select-Object @{ Label = "Mountpoint" ; Expression = { (($_.Mountpoint.split("\\"))[2])}},IOPS,Latency,Bandwidth | ConvertTo-Json
-
-Send-JsonOverTcp 127.0.0.1 8097 "$qos"
-
-$qosvm = Get-StorageQosFlow |Select-Object InitiatorName, @{Expression={$_.InitiatorNodeName.Substring(0,$_.InitiatorNodeName.IndexOf('.'))};Label="InitiatorNodeName"},StorageNodeIOPs | ConvertTo-Json
-
-Send-JsonOverTcp 127.0.0.1 8098 "$qosvm"
