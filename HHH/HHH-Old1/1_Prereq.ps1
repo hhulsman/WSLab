@@ -1,47 +1,56 @@
 # Verify Running as Admin
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-If (-not $isAdmin) {
+If (!( $isAdmin )) {
     Write-Host "-- Restarting as Administrator" -ForegroundColor Cyan ; Start-Sleep -Seconds 1
-
-    if($PSVersionTable.PSEdition -eq "Core") {
-        Start-Process pwsh.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
-    } else {
-        Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
-    }
-    
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
     exit
 }
 
 # Skipping 10 lines because if running when all prereqs met, statusbar covers powershell output
-1..10 | ForEach-Object { Write-Host "" }
+1..10 |% { Write-Host ""}
 
 #region Functions
-# . .\0_Shared.ps1 # [!build-include-inline]
-. "$PSScriptRoot\0_Shared.ps1" # Former line didn't work (PS v5.1), HHH
+
+function WriteInfo($message){
+        Write-Host $message
+    }
+
+function WriteInfoHighlighted($message){
+    Write-Host $message -ForegroundColor Cyan
+}
+
+function WriteSuccess($message){
+    Write-Host $message -ForegroundColor Green
+}
+
+function WriteError($message){
+    Write-Host $message -ForegroundColor Red
+}
+
+function WriteErrorAndExit($message){
+    Write-Host $message -ForegroundColor Red
+    Write-Host "Press enter to continue ..."
+    Stop-Transcript
+    Read-Host | Out-Null
+    Exit
+}
 
 function  Get-WindowsBuildNumber { 
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem
+    $os = Get-WmiObject -Class Win32_OperatingSystem 
     return [int]($os.BuildNumber) 
 } 
+
 #endregion
 
-#region Initialization
-
+#region Initializtion
 
 # grab Time and start Transcript
-    Start-Transcript -Path "$ScriptRoot\Prereq.log"
-    $StartDateTime = Get-Date
+    Start-Transcript -Path "$PSScriptRoot\Prereq.log"
+    $StartDateTime = get-date
     WriteInfo "Script started at $StartDateTime"
-    WriteInfo "`nWSLab Version $wslabVersion"
 
 #Load LabConfig....
-    . "$ScriptRoot\LabConfig.ps1"
-
-# Telemetry Event
-    if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
-        WriteInfo "Telemetry is set to $(Get-TelemetryLevel) level from $(Get-TelemetryLevelSource)"
-        Send-TelemetryEvent -Event "Prereq.Start" -NickName $LabConfig.TelemetryNickName | Out-Null
-    }
+    . "$PSScriptRoot\LabConfig.ps1"
 
 #define some variables if it does not exist in labconfig
     If (!$LabConfig.DomainNetbiosName){
@@ -72,7 +81,7 @@ function  Get-WindowsBuildNumber {
     "ParentDisks","Temp","Temp\DSC","Temp\ToolsVHD\DiskSpd","Temp\ToolsVHD\SCVMM\ADK","Temp\ToolsVHD\SCVMM\ADKWinPE","Temp\ToolsVHD\SCVMM\SQL","Temp\ToolsVHD\SCVMM\SCVMM","Temp\ToolsVHD\SCVMM\UpdateRollup","Temp\ToolsVHD\VMFleet" | ForEach-Object {
         if (!( Test-Path "$PSScriptRoot\$_" )) { New-Item -Type Directory -Path "$PSScriptRoot\$_" } }
 
-    "Temp\ToolsVHD\SCVMM\ADK\Copy_ADK_with_adksetup.exe_here.txt","Temp\ToolsVHD\SCVMM\ADKWinPE\Copy_ADKWinPE_with_adkwinpesetup.exe_here.txt","Temp\ToolsVHD\SCVMM\SQL\Copy_SQL2017_or_SQL2019_with_setup.exe_here.txt","Temp\ToolsVHD\SCVMM\SCVMM\Copy_SCVMM_with_setup.exe_here.txt","Temp\ToolsVHD\SCVMM\UpdateRollup\Copy_SCVMM_Update_Rollup_MSPs_here.txt" | ForEach-Object {
+    "Temp\ToolsVHD\SCVMM\ADK\Copy_ADK_with_adksetup.exe_here.txt","Temp\ToolsVHD\SCVMM\ADKWinPE\Copy_ADKWinPE_with_adkwinpesetup.exe_here.txt","Temp\ToolsVHD\SCVMM\SQL\Copy_SQL2016_or_SQL2017_with_setup.exe_here.txt","Temp\ToolsVHD\SCVMM\SCVMM\Copy_SCVMM_with_setup.exe_here.txt","Temp\ToolsVHD\SCVMM\UpdateRollup\Copy_SCVMM_Update_Rollup_MSPs_here.txt" | ForEach-Object {
         if (!( Test-Path "$PSScriptRoot\$_" )) { New-Item -Type File -Path "$PSScriptRoot\$_" } }
 #endregion
 
@@ -116,36 +125,22 @@ function  Get-WindowsBuildNumber {
         }
     }
 
-# add createparentdisks and DownloadLatestCU scripts to Parent Disks folder
-    $FileNames="CreateParentDisk","DownloadLatestCUs"
-    foreach ($filename in $filenames){
-        $Path="$PSScriptRoot\ParentDisks\$FileName.ps1"
-        If (Test-Path -Path $Path){
-            WriteSuccess "`t $Filename is present, skipping download"
+# add createparentdisks script
+    $Filename="CreateParentDisk"
+    $Path="$PSScriptRoot\ParentDisks\$FileName.ps1"
+    If (Test-Path -Path $Path){
+        WriteSuccess "`t $Filename is present, skipping download"
+    }else{
+        $FileContent = $null
+        $FileContent = (Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/Microsoft/WSLab/master/Tools/CreateParentDisk.ps1).Content
+        if ($FileContent){
+            $script = New-Item "$PSScriptRoot\ParentDisks\CreateParentDisk.ps1" -type File -Force
+            Set-Content -path $script -value $FileContent
         }else{
-            $FileContent = $null
-            $FileContent = (Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Microsoft/WSLab/master/Tools/$FileName.ps1").Content
-            if ($FileContent){
-                $script = New-Item "$PSScriptRoot\ParentDisks\$FileName.ps1" -type File -Force
-                Set-Content -path $script -value $FileContent
-            }else{
-                WriteErrorAndExit "Unable to download $Filename."
-            }
+            WriteErrorAndExit "Unable to download $Filename."
         }
     }
 
-# Download convert-windowsimage into Temp
-WriteInfoHighlighted "Testing Convert-windowsimage presence"
-If ( Test-Path -Path "$PSScriptRoot\Temp\Convert-WindowsImage.ps1" ) {
-    WriteSuccess "`t Convert-windowsimage.ps1 is present, skipping download"
-}else{ 
-    WriteInfo "`t Downloading Convert-WindowsImage"
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/microsoft/WSLab/master/Tools/Convert-WindowsImage.ps1" -OutFile "$PSScriptRoot\Temp\Convert-WindowsImage.ps1"
-    } catch {
-        WriteError "`t Failed to download Convert-WindowsImage.ps1!"
-    }
-}
 #endregion
 
 #region some tools to download
@@ -156,16 +151,8 @@ If ( Test-Path -Path "$PSScriptRoot\Temp\Convert-WindowsImage.ps1" ) {
     }else{ 
         WriteInfo "`t Diskspd not there - Downloading diskspd"
         try {
-            <# aka.ms/diskspd changed. Commented
-            $webcontent  = Invoke-WebRequest -Uri "https://aka.ms/diskspd" -UseBasicParsing
-            if($PSVersionTable.PSEdition -eq "Core") {
-                $link = $webcontent.Links | Where-Object data-url -Match "/Diskspd.*zip$"
-                $downloadUrl = "{0}://{1}{2}" -f $webcontent.BaseResponse.RequestMessage.RequestUri.Scheme, $webcontent.BaseResponse.RequestMessage.RequestUri.Host, $link.'data-url'
-            } else {
-                $downloadurl = $webcontent.BaseResponse.ResponseUri.AbsoluteUri.Substring(0,$webcontent.BaseResponse.ResponseUri.AbsoluteUri.LastIndexOf('/'))+($webcontent.Links | where-object { $_.'data-url' -match '/Diskspd.*zip$' }|Select-Object -ExpandProperty "data-url")
-            }
-            #>
-            $downloadurl="https://github.com/microsoft/diskspd/releases/download/v2.0.21a/DiskSpd-2.0.21a.zip"
+            $webcontent  = Invoke-WebRequest -Uri aka.ms/diskspd -UseBasicParsing
+            $downloadurl = $webcontent.BaseResponse.ResponseUri.AbsoluteUri.Substring(0,$webcontent.BaseResponse.ResponseUri.AbsoluteUri.LastIndexOf('/'))+($webcontent.Links | where-object { $_.'data-url' -match '/Diskspd.*zip$' }|Select-Object -ExpandProperty "data-url")
             Invoke-WebRequest -Uri $downloadurl -OutFile "$PSScriptRoot\Temp\ToolsVHD\DiskSpd\diskspd.zip"
         }catch{
             WriteError "`t Failed to download Diskspd!"
@@ -195,12 +182,25 @@ If ( Test-Path -Path "$PSScriptRoot\Temp\Convert-WindowsImage.ps1" ) {
             Remove-Item -Path "$PSScriptRoot\Temp\ToolsVHD\VMFleet\VMFleet.zip"
             Remove-Item -Path "$PSScriptRoot\Temp\ToolsVHD\VMFleet\Unzip" -Recurse -Force
     }
+
+# Download convert-windowsimage into Temp
+    WriteInfoHighlighted "Testing convert-windowsimage presence"
+    If ( Test-Path -Path "$PSScriptRoot\Temp\convert-windowsimage.ps1" ) {
+        WriteSuccess "`t Convert-windowsimage.ps1 is present, skipping download"
+    }else{ 
+        WriteInfo "`t Downloading Convert-WindowsImage"
+        try{
+            Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/MicrosoftDocs/Virtualization-Documentation/live/hyperv-tools/Convert-WindowsImage/Convert-WindowsImage.ps1 -OutFile "$PSScriptRoot\Temp\convert-windowsimage.ps1"
+        }catch{
+            WriteError "`t Failed to download convert-windowsimage.ps1!"
+        }
+    }
 #endregion
 
 #region Downloading required Posh Modules
 # Downloading modules into Temp folder if needed.
 
-    $modules=("xActiveDirectory","3.0.0.0"),("xDHCpServer","2.0.0.0"),("xDNSServer","1.15.0.0"),("NetworkingDSC","7.4.0.0"),("xPSDesiredStateConfiguration","8.10.0.0")
+    $modules=("xActiveDirectory","2.19.0.0"),("xDHCpServer","2.0.0.0"),("xDNSServer","1.11.0.0"),("NetworkingDSC","6.0.0.0"),("xPSDesiredStateConfiguration","8.4.0.0")
     foreach ($module in $modules){
         WriteInfoHighlighted "Testing if modules are present" 
         $modulename=$module[0]
@@ -236,15 +236,6 @@ If ( Test-Path -Path "$PSScriptRoot\Temp\Convert-WindowsImage.ps1" ) {
     }
 
 #endregion
-
-# Telemetry Event
-if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
-    $metrics = @{
-        'script.duration' = ((Get-Date) - $StartDateTime).TotalSeconds
-    }
- 
-    Send-TelemetryEvent -Event "Prereq.End" -Metrics $metrics -NickName $LabConfig.TelemetryNickName | Out-Null
-}
 
 # finishing 
 WriteInfo "Script finished at $(Get-date) and took $(((get-date) - $StartDateTime).TotalMinutes) Minutes"

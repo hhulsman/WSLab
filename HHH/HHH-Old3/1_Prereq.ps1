@@ -16,8 +16,7 @@ If (-not $isAdmin) {
 1..10 | ForEach-Object { Write-Host "" }
 
 #region Functions
-# . .\0_Shared.ps1 # [!build-include-inline]
-. "$PSScriptRoot\0_Shared.ps1" # Former line didn't work (PS v5.1), HHH
+. .\0_Shared.ps1 # [!build-include-inline]
 
 function  Get-WindowsBuildNumber { 
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
@@ -156,16 +155,14 @@ If ( Test-Path -Path "$PSScriptRoot\Temp\Convert-WindowsImage.ps1" ) {
     }else{ 
         WriteInfo "`t Diskspd not there - Downloading diskspd"
         try {
-            <# aka.ms/diskspd changed. Commented
             $webcontent  = Invoke-WebRequest -Uri "https://aka.ms/diskspd" -UseBasicParsing
             if($PSVersionTable.PSEdition -eq "Core") {
                 $link = $webcontent.Links | Where-Object data-url -Match "/Diskspd.*zip$"
                 $downloadUrl = "{0}://{1}{2}" -f $webcontent.BaseResponse.RequestMessage.RequestUri.Scheme, $webcontent.BaseResponse.RequestMessage.RequestUri.Host, $link.'data-url'
             } else {
-                $downloadurl = $webcontent.BaseResponse.ResponseUri.AbsoluteUri.Substring(0,$webcontent.BaseResponse.ResponseUri.AbsoluteUri.LastIndexOf('/'))+($webcontent.Links | where-object { $_.'data-url' -match '/Diskspd.*zip$' }|Select-Object -ExpandProperty "data-url")
+                #$downloadurl = $webcontent.BaseResponse.ResponseUri.AbsoluteUri.Substring(0,$webcontent.BaseResponse.ResponseUri.AbsoluteUri.LastIndexOf('/'))+($webcontent.Links | where-object { $_.'data-url' -match '/Diskspd.*zip$' }|Select-Object -ExpandProperty "data-url")
+                $downloadurl = $webcontent.Links | where { $_.href -match 'diskspd.*zip' -and $_.href -match 'download' } | Select-Object href ###HHH
             }
-            #>
-            $downloadurl="https://github.com/microsoft/diskspd/releases/download/v2.0.21a/DiskSpd-2.0.21a.zip"
             Invoke-WebRequest -Uri $downloadurl -OutFile "$PSScriptRoot\Temp\ToolsVHD\DiskSpd\diskspd.zip"
         }catch{
             WriteError "`t Failed to download Diskspd!"
