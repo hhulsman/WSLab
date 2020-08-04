@@ -690,7 +690,7 @@ If (!( $isAdmin )) {
     }
 
     If (!$LabConfig.LocalAdminGroup){
-        $LabConfig.LocalAdminUser="Administrators"
+        $LabConfig.LocalAdminGroup="Administrators"
     }
 
     If (!$LabConfig.GuestServiceInterfaceName){

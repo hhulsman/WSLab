@@ -1,9 +1,13 @@
 # Push to production
 
-$LabVersion = "WSLab4"
-$LabFile    = "LabConfig-$($LabVersion).ps1"
-$LabDir     = "\\ANIMC01\ClusterStorage$\Volume3\WSLab\$LabVersion"
+$LabName    = "WSLab4"
+$LabFile    = "LabConfig-$($LabName).ps1"
+$LabDir     = "\\ANIMC01\ClusterStorage$\Volume3\WSLab\$LabName"
 
+# Crear directorio destino si no existe
+if (!(Test-Path -Path $LabDir -ErrorAction SilentlyContinue)) {
+    New-Item -Path $LabDir -ItemType Directory
+}
 # Copiar todo el contenido de Scripts a $Labdir
 Copy-Item .\Scripts\*.ps1 $LabDir
 

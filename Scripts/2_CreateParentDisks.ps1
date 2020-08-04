@@ -56,10 +56,7 @@ If (-not $isAdmin) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
-        <OEMInformation>
-          <SupportProvider>WSLab</SupportProvider>
-          <SupportURL>https://aka.ms/wslab</SupportURL>
-        </OEMInformation>
+        <!-- HHH 4 lines deleted, OEM information, throws an error in W2016 at startup of DC-->
         <RegisteredOwner>PFE</RegisteredOwner>
         <RegisteredOrganization>Contoso</RegisteredOrganization>
     </component>
@@ -147,17 +144,17 @@ If (-not $isAdmin) {
         #     $LabConfig.LocalAdminGroup="Administrators"
         # }
 
-        # If (!$LabConfig.DomainAdminGroup){
-        #     $LabConfig.DomainAdminGroup="Domain Admins"
-        # }
+        If (!$LabConfig.DomainAdminGroup){
+            $LabConfig.DomainAdminGroup="Domain Admins"
+        }
 
-        # If (!$LabConfig.SchemaAdminGroup){
-        #     $LabConfig.SchemaAdminGroup="Schema Admins"
-        # }
+        If (!$LabConfig.SchemaAdminGroup){
+            $LabConfig.SchemaAdminGroup="Schema Admins"
+        }
 
-        # If (!$LabConfig.EnterpriseAdminGroup){
-        #     $LabConfig.EnterpriseAdminGroup="Enterprise Admins"
-        # }
+        If (!$LabConfig.EnterpriseAdminGroup){
+            $LabConfig.EnterpriseAdminGroup="Enterprise Admins"
+        }
         # End HHH
 
     
@@ -782,14 +779,14 @@ If (-not $isAdmin) {
 
                     xADGroup DomainAdmins
                     {
-                        GroupName = "Domain Admins"
+                        GroupName = "$($LabConfig.DomainAdminGroup)"
                         DependsOn = "[xADUser]VMM_SA"
                         MembersToInclude = "VMM_SA",$Node.DomainAdminName
                     }
 
                     xADGroup SchemaAdmins
                     {
-                        GroupName = "Schema Admins"
+                        GroupName = "$($LabConfig.SchemaAdminGroup)"
                         GroupScope = "Universal"
                         DependsOn = "[xADUser]VMM_SA"
                         MembersToInclude = $Node.DomainAdminName
@@ -797,7 +794,7 @@ If (-not $isAdmin) {
 
                     xADGroup EntAdmins
                     {
-                        GroupName = "Enterprise Admins"
+                        GroupName = "$($LabConfig.EnterpriseAdminGroup)"
                         GroupScope = "Universal"
                         DependsOn = "[xADUser]VMM_SA"
                         MembersToInclude = $Node.DomainAdminName
@@ -806,7 +803,7 @@ If (-not $isAdmin) {
                     xADUser AdministratorNeverExpires
                     {
                         DomainName = $Node.DomainName
-                        UserName = "Administrator"
+                        UserName = "$($Labconfig.LocalAdminUser)"
                         Ensure = "Present"
                         DependsOn = "[xADDomain]FirstDS"
                         PasswordNeverExpires = $true

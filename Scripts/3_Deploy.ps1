@@ -66,11 +66,8 @@ If (-not $isAdmin) {
   </settings>
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <OEMInformation>
-        <SupportProvider>WSLab</SupportProvider>
-        <SupportURL>https://aka.ms/wslab</SupportURL>
-      </OEMInformation>
-      <RegisteredOwner>PFE</RegisteredOwner>
+    <!-- HHH 4 lines deleted, OEM information, throws an error in W2016 at startup of VMs-->
+    <RegisteredOwner>PFE</RegisteredOwner>
       <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
     <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -165,6 +162,9 @@ If (-not $isAdmin) {
             $ComputerName,
             [parameter(Mandatory=$true)]
             [string]
+            $LocalAdminUser, # HHH
+            [parameter(Mandatory=$true)]
+            [string]
             $AdminPassword,
             [parameter(Mandatory=$true)]
             [string]
@@ -203,7 +203,7 @@ If (-not $isAdmin) {
                 <Credentials>
                     <Domain>$DomainName</Domain>
                     <Password>$AdminPassword</Password>
-                    <Username>Administrator</Username>
+                    <Username>$LocalAdminUser</Username>
                 </Credentials>
                 <JoinDomain>$DomainName</JoinDomain>
         </Identification>
@@ -242,6 +242,9 @@ If (-not $isAdmin) {
             $AdminPassword,
             [parameter(Mandatory=$true)]
             [string]
+            $LocalAdminGroup, # HHH
+            [parameter(Mandatory=$true)]
+            [string]
             $AdditionalAdminName
         )
 @"
@@ -253,7 +256,7 @@ If (-not $isAdmin) {
         </Password>
         <Description>$AdditionalAdminName admin account</Description>
         <DisplayName>$AdditionalAdminName</DisplayName>
-        <Group>Administrators</Group>
+        <Group>$LocalAdminGroup</Group>
         <Name>$AdditionalAdminName</Name>
     </LocalAccount>
 </LocalAccounts>
@@ -599,13 +602,13 @@ If (-not $isAdmin) {
             if ($VMConfig.AdditionalLocalAdmin){
                 WriteInfo "`t Additional Local Admin $($VMConfig.AdditionalLocalAdmin) will be added"
                 $AdditionalLocalAccountXML=AdditionalLocalAccountXML -AdditionalAdminName $VMConfig.AdditionalLocalAdmin -AdminPassword $LabConfig.AdminPassword
-                $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -AdditionalAccount $AdditionalLocalAccountXML -TimeZone $TimeZone
+                $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -LocalAdminGroup $LabConfig.LocalAdminGroup -AdditionalAccount $AdditionalLocalAccountXML -TimeZone $TimeZone
             }else{
                 $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -TimeZone $TimeZone
             }
         }elseif($VMConfig.Win2012Djoin -or $VMConfig.Unattend -eq "DjoinCred"){
             WriteInfoHighlighted "`t Creating Unattend with win2012-ish domain join"
-            $unattendfile=CreateUnattendFileWin2012 -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -DomainName $Labconfig.DomainName -RunSynchronous $RunSynchronous -TimeZone $TimeZone
+            $unattendfile=CreateUnattendFileWin2012 -ComputerName $Name -LocalAdminUser $LabConfig.LocalAdminUser -AdminPassword $LabConfig.AdminPassword -DomainName $Labconfig.DomainName -RunSynchronous $RunSynchronous -TimeZone $TimeZone
 
         }elseif($VMConfig.Unattend -eq "DjoinBlob" -or -not ($VMConfig.Unattend)){
             WriteInfoHighlighted "`t Creating Unattend with djoin blob"
@@ -700,6 +703,20 @@ If (-not $isAdmin) {
     if (!$Labconfig.AllowedVLANs){
         $Labconfig.AllowedVLANs="1-10"
     }
+
+    # Begin HHH
+    If (!$LabConfig.LocalAdminUser){
+        $LabConfig.LocalAdminUser="Administrator"
+    }
+
+    If (!$LabConfig.LocalAdminGroup){
+        $LabConfig.LocalAdminGroup="Administrators"
+    }
+
+    If (!$LabConfig.GuestServiceInterfaceName){
+        $LabConfig.GuestServiceInterfaceName="Guest Service Interface"
+    }
+    # End HHH
 
     $DN=$null
     $LabConfig.DomainName.Split(".") | ForEach-Object {
@@ -1148,7 +1165,7 @@ If (-not $isAdmin) {
 #region Test DC to come up
 
     #Credentials for Session
-        $username = "$($Labconfig.DomainNetbiosName)\Administrator"
+        $username = "$($Labconfig.DomainNetbiosName)\$($LabConfig.LocalAdminUser)" # HHH
         $password = $LabConfig.AdminPassword
         $secstr = New-Object -TypeName System.Security.SecureString
         $password.ToCharArray() | ForEach-Object {$secstr.AppendChar($_)}
@@ -1512,7 +1529,7 @@ If (-not $isAdmin) {
     #Enable Guest services on all VMs if integration component if configured
     if ($labconfig.EnableGuestServiceInterface){
         WriteInfo "`t Enabling Guest Service Interface"
-        Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -eq "Running" -or $_.state -eq "Off"} | Enable-VMIntegrationService -Name "Guest Service Interface"
+        Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -eq "Running" -or $_.state -eq "Off"} | Enable-VMIntegrationService -Name $($LabConfig.GuestServiceInterfaceName) # HHH
         $TempVMs=Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -ne "Running" -and $_.state -ne "Off"}
         if ($TempVMs){
             WriteInfoHighlighted "`t`t Following VMs cannot be configured, as the state is not running or off"
