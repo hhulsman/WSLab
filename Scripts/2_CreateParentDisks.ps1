@@ -56,10 +56,10 @@ If (-not $isAdmin) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
-        <OEMInformation>
+<!--    <OEMInformation>
           <SupportProvider>WSLab</SupportProvider>
           <SupportURL>https://aka.ms/wslab</SupportURL>
-        </OEMInformation>
+        </OEMInformation>      *** HHH: Deleted, gives an error in W2016 DC *** -->
         <RegisteredOwner>PFE</RegisteredOwner>
         <RegisteredOrganization>Contoso</RegisteredOrganization>
     </component>
@@ -138,7 +138,29 @@ If (-not $isAdmin) {
             $LabConfig.DHCPscope="10.0.0.0"
         }
 
+        # Begin HHH
+        If (!$LabConfig.LocalAdminUser){
+            $LabConfig.LocalAdminUser="Administrator"
+        }
 
+        # If (!$LabConfig.LocalAdminGroup){
+        #     $LabConfig.LocalAdminGroup="Administrators"
+        # }
+
+        # If (!$LabConfig.DomainAdminGroup){
+        #     $LabConfig.DomainAdminGroup="Domain Admins"
+        # }
+
+        # If (!$LabConfig.SchemaAdminGroup){
+        #     $LabConfig.SchemaAdminGroup="Schema Admins"
+        # }
+
+        # If (!$LabConfig.EnterpriseAdminGroup){
+        #     $LabConfig.EnterpriseAdminGroup="Enterprise Admins"
+        # }
+        # End HHH
+
+    
     #create some built-in variables
         $DN=$null
         $LabConfig.DomainName.Split(".") | ForEach-Object {
@@ -604,7 +626,8 @@ If (-not $isAdmin) {
 
         #Create credentials for DSC
 
-            $username = "$($LabConfig.DomainNetbiosName)\Administrator"
+            #$username = "$($LabConfig.DomainNetbiosName)\Administrator"
+            $username = "$($LabConfig.DomainNetbiosName)\$($LabConfig.LocalAdminUser)" # HHH
             $password = $AdminPassword
             $secstr = New-Object -TypeName System.Security.SecureString
             $password.ToCharArray() | ForEach-Object {$secstr.AppendChar($_)}
