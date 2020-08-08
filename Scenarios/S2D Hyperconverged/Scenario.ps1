@@ -52,6 +52,7 @@ Write-host "Script started at $StartDateTime"
         $StorVLAN2=2
 
         $SRIOV=$true #Deploy SR-IOV enabled switch (best practice is to enable if possible)
+        $SRIOV=$false # HHH - no se puede avanzar, el físico no lo soporta por LbfoTeam
 
     #start IP for storage network
         $IP=1
@@ -65,6 +66,7 @@ Write-host "Script started at $StartDateTime"
 
     #Configure dcb? (more info at http://aka.ms/ConvergedRDMA)
         $DCB=$False #$true for ROCE, $false for iWARP
+        $DCB=$True  # HHH.
 
     #iWARP?
         $iWARP=$False
@@ -108,8 +110,8 @@ Write-host "Script started at $StartDateTime"
         $MemoryDump="Active"
 
     #real VMs? If true, script will create real VMs on mirror disks from vhd you will provide during the deployment. The most convenient is to provide NanoServer
-        $realVMs=$false
-        $NumberOfRealVMs=2 #number of VMs on each mirror disk
+    $realVMs=$true # HHH. Nota: Conectar K: a \\ANIMC01\ClusterStorage$ antes, para poder seleccionar ParentDisk
+    $NumberOfRealVMs=2 #number of VMs on each mirror disk
 
     #ask for parent VHDx if real VMs will be created
         if ($realVMs){
