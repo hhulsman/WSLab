@@ -41,26 +41,28 @@
 	
 #region Preparar el primer Lab (WSLab1)
 #
-#   Ejecutar todo en Host (ANIMP10)	
-#
-#	- Copiar todo el contenido de WSLab\HHH a destino (\\ANIMC01\ClusterStorage$\Volume3\WSLab\WSLab1):
-#		- Renombrar Labconfig-WSLabx.ps1 a LabConfig.ps1 en destino
-#		- Borrar resto ficheros LabConfig-WSLabx.ps1 en destino
+#   Ejecutar en puesto de trabajo:
+#	- Comprobar $LabName en 'Push to production.ps1' (WSLabn)
+#   - Comprobar si existe 'LabConfig-WSLabn.ps1'
+#   - Ejecutar 'Push to production.ps1'
 #	
+#   Ejecutar todo en Host (ANIMP10, ANIMP11, ...)	
+#
 #	- Ejecutar 1_Prereqs.ps1
 #
 #	- Ejecutar 2_CreateParentDisks.ps1
 #       - Esto crea los discos padre, y el DC del laboratorio
 #       - Al final, cuando pregunta si quiere hacer cleanup, contestar 'Y'
 #
-#   - Mover WSLab\WSLab1\ParentDisks a WSLab\ParentDisks.
+#   - Mover WSLab\WSLabn\ParentDisks a WSLab\ParentDisks:
+#       - Ejecutando 2_MoveParentDisks.ps1
 #       - Sirve para dejar los discos creados disponible para múltiples labs
 #       - Luego será utilizado con el parámetro ServerParentPath en LabConfig, en Deploy.ps1
 #	
 #	- Si se va a necesitar VMs con Windows 10:
 #		- Ejecutar ParentDisks\CreateParentDisks.ps1 (este script se ha creado en el paso 2_CreateParentDisks)
 #       - Seleccionar ISO desde "\\animsa9\Instalaciones\Software\Microsoft\Windows 10\Windows 10 ISOs"
-#       - Opcionalmente seleccionar MSU (actualizaciones). No es necesario
+#       - Opcionalmente seleccionar MSU (actualizaciones)
 #       - Seleccionar versión de Windows 10 (Windows 10 Pro)
 #		- Cuando solicita el nombre del fichero a generar (poner: Win10_G2.vhdx (incluir la extensión))
 #	
@@ -69,14 +71,16 @@
 #		- Revisar LabConfig.ps1 por número de servidores y puestos de trabajo
 #		- Se puede volver a ejecutar este script si posteriormente se quiere añadir más máquinas virtuales
 #
-#	- Ejecutar 4_StartLab.ps1 (Crea el switch si no existe y arranca VMs)
+#	- Ejecutar 4_StartLab.ps1 (Crea el switch virtual si no existe y arranca VMs)
 #
 #	- Ejecutar 5_PostDeploy.ps1 (habilita RDP en DC etc.)
 #       - Esperar hasta que todas las VMs han terminado de arrancar del paso anterior
 #	
-#   - Iniciar sesión en DC
+#   - Crear scenarios:
+#       - Iniciar sesión en DC
 #	    - Abrir Powershell ISE en modo admin
-#	    - Copiar y ejecutar Scenarioxxxx.ps1. Esto crea el clúster y S2D, o instala WAC, etc.
+#	    - Copiar y ejecutar Scenario.ps1.
+#       - Por ejemplo el de 'Scenarios\S2D HyperConverged' crea un clúster y habilita S2D
 #	
 #   - Posteriormente se puede apagar y volver a encender el lab con los siguientes scripts:
 #	    - 4_StartLab.ps1 (Crea el switch si no existe y arranca VMs)
@@ -85,6 +89,10 @@
 #   - También se puede eliminar el lab y volver a crear con:
 #	    - Cleanup.ps1 (Apaga el DC, y elimina switch y VMs (pero no los parentdisks, ni el DC))
 #       - Posteriormente se puede desplegar de nuevo con Deploy.ps1, seguido por 4_StartLab.ps1, 5_PostDeploy.ps1 y Scenarioxxxx.ps1
+#
+#   - Los scripts 7_CreateSnapshot, 8_RestoreSnapshot y 9_DeleteSnapshot sirven respectivamente para consolidar
+#     el estado del laboratorio, volver a un estado anterior sin tener que desplegar por completo,
+#     y eliminar snapshots.
 #
 #endregion
 

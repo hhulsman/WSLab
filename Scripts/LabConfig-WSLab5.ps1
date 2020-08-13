@@ -3,7 +3,7 @@
 $LabConfig = @{
 	DomainAdminName				= 'LabAdmin'
 	AdminPassword				= 'Pamplona1'
-	Prefix 						= 'WSLab4-'
+	Prefix 						= 'WSLab5-'
     SwitchName                  = 'Switch'
 	DCEdition					= '4'
     DCVMProcessorCount          = 4

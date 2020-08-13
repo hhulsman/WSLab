@@ -16,11 +16,6 @@
 
 # 0. Definir nombre snapshot
     $SnapshotName = 'Con PostDeploy aplicado'
-    $SnapshotName = 'Antes de Team Aruba'
-    $SnapshotName = 'Después de Team Aruba'
-    $SnapshotName = 'Después de Team Aruba'
-    $SnapshotName = 'Red configurada (Paso 2)'
-    #$SnapshotName = 'Red configurada (Paso 2, sin vlan)'
 
 
 # Importar modulo Hyper-V con prefijo, para distinguir comandos con el mismo nombre de VMware

@@ -419,7 +419,15 @@ If (-not $isAdmin) {
         )
         WriteInfoHighlighted "Creating VM $($VMConfig.VMName)"
         WriteInfo "`t Looking for Parent Disk"
-        $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        # $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        # Begin HHH
+        # Use ServerParentPath in case of multiple labs over one set of parentdisks
+        if ($LabConfig.ServerParentPath){
+            $serverparent=Get-ChildItem $LabConfig.ServerParentPath -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        }else{
+            $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        }
+        # End HHH
             
         if ($serverparent -eq $null){
             WriteErrorAndExit "Server parent disk $($VMConfig.ParentVHD) not found."
@@ -1006,7 +1014,15 @@ If (-not $isAdmin) {
 
     #get path for Tools disk
         WriteInfoHighlighted "Looking for Tools Parent Disks"
-        $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+        # $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+        # Begin HHH
+        # Look for tools vhd in ServerParentPath in case of multiple labs over one set of parentdisks
+        if ($LabConfig.ServerParentPath){
+            $toolsparent=Get-ChildItem $LabConfig.ServerParentPath -Recurse | Where-Object name -eq tools.vhdx
+        }else{
+            $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+        }
+        # End HHH
         if ($toolsparent -eq $null){
             WriteInfo "`t Tools parent disk not found. Will create one."
             WriteInfoHighlighted "Creating Tools.vhdx"

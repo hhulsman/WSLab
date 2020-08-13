@@ -129,6 +129,9 @@ Write-host "Script started at $StartDateTime"
             $VHDPath = $openFile.FileName
         }
 
+    #Values for Test-Cluster # HHH, traducción
+    $TestClusterValues = "Storage Spaces Direct","Inventario","Red","Configuración del sistema","Configuración de Hyper-V"
+
 #endregion
 
 #region install features for management (Client needs RSAT, Server/Server Core have different features)
@@ -464,7 +467,8 @@ Write-host "Script started at $StartDateTime"
                 Invoke-Command -ComputerName $servers -ScriptBlock {Get-NetQosDcbxSetting} | Sort-Object PSComputerName | Format-Table Willing,PSComputerName
 
             #Apply policy to the target adapters.  The target adapters are adapters connected to vSwitch
-                Invoke-Command -ComputerName $servers -ScriptBlock {Enable-NetAdapterQos -InterfaceDescription (Get-VMSwitch).NetAdapterInterfaceDescriptions}
+                # Invoke-Command -ComputerName $servers -ScriptBlock {Enable-NetAdapterQos -InterfaceDescription (Get-VMSwitch).NetAdapterInterfaceDescriptions}
+                # HHH Da error: NetAdapterInterfaceDescriptions no devuelve ningún valor
 
             #validate policy
                 Invoke-Command -ComputerName $servers -ScriptBlock {Get-NetAdapterQos | Where-Object enabled -eq true} | Sort-Object PSComputerName
@@ -484,7 +488,13 @@ Write-host "Script started at $StartDateTime"
 #endregion
 
 #region Create HyperConverged cluster and configure basic settings
-    Test-Cluster -Node $servers -Include "Storage Spaces Direct","Inventory","Network","System Configuration","Hyper-V Configuration"
+    # HHH Check build and revision numbers, otherwise Test-Cluster will fail
+    Invoke-Command -ComputerName $servers -ScriptBlock {Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' -Name UBR}
+
+    # Test-Cluster -Node $servers -Include "Storage Spaces Direct","Inventory","Network","System Configuration","Hyper-V Configuration"
+    Test-Cluster -Node $servers -ReportName "$($ENV:Temp)\TestClusterReport" -Include $TestClusterValues # HHH, traducción
+    Start-Process -FilePath "$($ENV:Temp)\TestClusterReport.htm" # HHH
+
     if ($ClusterIP){
         New-Cluster -Name $ClusterName -Node $servers -StaticAddress $ClusterIP
     }else{
@@ -510,7 +520,8 @@ Write-host "Script started at $StartDateTime"
             Invoke-Command -ComputerName DC -ScriptBlock {new-item -Path c:\Shares -Name $using:WitnessName -ItemType Directory}
             $accounts=@()
             $accounts+="corp\$ClusterName$"
-            $accounts+="corp\Domain Admins"
+            #$accounts+="corp\Domain Admins"
+            $accounts+="corp\Admins. del Dominio" # HHH
             New-SmbShare -Name $WitnessName -Path "c:\Shares\$WitnessName" -FullAccess $accounts -CimSession DC
         #Set NTFS permissions 
             Invoke-Command -ComputerName DC -ScriptBlock {(Get-SmbShare $using:WitnessName).PresetPathAcl | Set-Acl}
@@ -888,7 +899,10 @@ Write-host "Script started at $StartDateTime"
                 $VMName="TestVM$($CSV)_$_"
                 New-Item -Path "\\$ClusterName\ClusterStorage$\$CSV\$VMName\Virtual Hard Disks" -ItemType Directory
                 Copy-Item -Path $VHDPath -Destination "\\$ClusterName\ClusterStorage$\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" 
-                New-VM -Name $VMName -MemoryStartupBytes 512MB -Generation 2 -Path "c:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -CimSession ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
+                # New-VM -Name $VMName -MemoryStartupBytes 512MB -Generation 2 -Path "c:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -CimSession ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
+                $RandomNode = ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
+                New-VM -Name $VMName -MemoryStartupBytes 4GB -Generation 2 -Path "C:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -SwitchName $vSwitchName -CimSession $RandomNode # HHH
+                Set-VMProcessor -VMName $VMName -Count 4 -CimSession $RandomNode # HHH
                 Add-ClusterVirtualMachineRole -VMName $VMName -Cluster $ClusterName
             }
         }
