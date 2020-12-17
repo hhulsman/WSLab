@@ -116,14 +116,12 @@ Note: script does not follow all best practices. For best practices visit [S2D H
 #Create VMs
     $CSVs=(Get-ClusterSharedVolume -Cluster $ClusterName).Name
     foreach ($CSV in $CSVs){
-        $CSV=$CSV.Substring(22)
-        $CSV=$CSV.TrimEnd(")")
+        $CSV=($csv -split '\((.*?)\)')[1]
         $VMName="TestVM$($CSV)"
         New-Item -Path "\\$ClusterName\ClusterStorage$\$CSV\$VMName\Virtual Hard Disks" -ItemType Directory
         Copy-Item -Path $VHDPath -Destination "\\$ClusterName\ClusterStorage$\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" 
         New-VM -Name $VMName -MemoryStartupBytes 512MB -Generation 2 -Path "c:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -CimSession ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
         Add-ClusterVirtualMachineRole -VMName $VMName -Cluster $ClusterName
-
     }
     #Start all VMs
     Start-VM -VMName * -CimSession (Get-ClusterNode -Cluster $clustername).Name
@@ -132,9 +130,7 @@ Note: script does not follow all best practices. For best practices visit [S2D H
 $GatewayServerName="WACGW"
 #Download Windows Admin Center if not present
 if (-not (Test-Path -Path "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi")){
-    $ProgressPreference='SilentlyContinue' #for faster download
-    Invoke-WebRequest -UseBasicParsing -Uri https://aka.ms/WACDownload -OutFile "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
-    $ProgressPreference='Continue' #return progress preference back
+    Start-BitsTransfer -Source https://aka.ms/WACDownload -Destination "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
 }
 #Create PS Session and copy install files to remote server
 Invoke-Command -ComputerName $GatewayServerName -ScriptBlock {Set-Item -Path WSMan:\localhost\MaxEnvelopeSizekb -Value 4096}
@@ -164,8 +160,7 @@ foreach ($computer in $computers){
 }
 
 #Install Edge
-$ProgressPreference='SilentlyContinue' #for faster download
-Invoke-WebRequest -Uri "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/40e309b4-5d46-4AE8-b839-bd74b4cff36e/MicrosoftEdgeEnterpriseX64.msi" -UseBasicParsing -OutFile "$env:USERPROFILE\Downloads\MicrosoftEdgeEnterpriseX64.msi"
+Start-BitsTransfer -Source "https://aka.ms/edge-msi" -Destination "$env:USERPROFILE\Downloads\MicrosoftEdgeEnterpriseX64.msi"
 #Install Edge
 Start-Process -Wait -Filepath msiexec.exe -Argumentlist "/i $env:UserProfile\Downloads\MicrosoftEdgeEnterpriseX64.msi /q"
 #start Edge

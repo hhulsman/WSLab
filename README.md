@@ -15,9 +15,12 @@ To start using WSLab just download the latest version of scrips from [Releases](
 <!-- TOC -->
 
 - [WSLab](#wslab)
+    - [tl;dr](#tldr)
     - [Introduction](#introduction)
     - [Requirements](#requirements)
     - [Scripts](#scripts)
+    - [Data Collection](#data-collection)
+        - [How to get the Scripts](#how-to-get-the-scripts)
     - [Scenarios](#scenarios)
     - [Use cases](#use-cases)
         - [Prototyping](#prototyping)
@@ -48,6 +51,10 @@ The main part of WSLab are the [Scripts](https://aka.ms/wslabzip) that will help
 
 ![](Docs/media/Explorer01.png)
 
+## Data Collection
+
+The software may collect information about you and your use of the software and send it to Microsoft. Microsoft may use this information to provide services and improve our products and services. You may turn off the telemetry as [described in the repository](http://aka.ms/wslab/telemetry). There are also some features in the software that may enable you and Microsoft to collect data from users of your applications. If you use these features, you must comply with applicable law, including providing appropriate notices to users of your applications together with a copy of Microsoft's privacy statement. Our privacy statement is located at https://go.microsoft.com/fwlink/?LinkID=824704. You can learn more about data collection and use in the help documentation and our privacy statement. Your use of the software operates as your consent to these practices.
+
 ### How to get the Scripts
 
 In the past, this ZIP file was stored in the git repository, and recently we switched to using a native Releases feature of Github, where all releases are available at https://github.com/microsoft/WSLab/releases. Also, we have a static direct link to the latest WSLab release on http://aka.ms/wslab/download which is updated automatically when we create a new version.
@@ -75,6 +82,8 @@ Many times happened, that there was an issue that was hard to reproduce. And eve
 ### Sessions
 
 For more session slides navigate to [Slides](https://1drv.ms/u/s!AjTsLJdE37DwtrsnIehxKx7N7XgoBg?e=r1sszn) OneDrive
+
+[![WSLab in MVPDays](/Docs/media/Deploying_AzSHCI_with_MDT.png)](https://youtu.be/Vipbhkv9wyM)
 
 [![WSLab with Carsten](/Docs/media/Create_great_demo_environments.png)](https://youtu.be/f3EH2NOM2Eg)
 

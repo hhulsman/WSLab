@@ -66,8 +66,9 @@ If (-not $isAdmin) {
   </settings>
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-    <!-- HHH 4 lines deleted, OEM information, throws an error in W2016 at startup of VMs-->
-    <RegisteredOwner>PFE</RegisteredOwner>
+    <!-- HHH next line commented, OEM information, throws an error in W2016 at startup of DC-->
+    <!-- $oeminformation -->
+      <RegisteredOwner>PFE</RegisteredOwner>
       <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
     <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -115,10 +116,7 @@ If (-not $isAdmin) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
-        <OEMInformation>
-          <SupportProvider>WSLab</SupportProvider>
-          <SupportURL>https://aka.ms/wslab</SupportURL>
-        </OEMInformation>
+        $oeminformation
         <RegisteredOwner>PFE</RegisteredOwner>
         <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
@@ -186,10 +184,7 @@ If (-not $isAdmin) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
-        <OEMInformation>
-          <SupportProvider>WSLab</SupportProvider>
-          <SupportURL>https://aka.ms/wslab</SupportURL>
-        </OEMInformation>
+        $oeminformation
         <RegisteredOwner>PFE</RegisteredOwner>
         <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
@@ -443,6 +438,11 @@ If (-not $isAdmin) {
         }
         WriteInfoHighlighted "`t Creating OS VHD"
         New-VHD -ParentPath $serverparent.fullname -Path $vhdpath
+
+        #Get VM Version
+        [System.Version]$VMVersion=(Get-WindowsImage -ImagePath $VHDPath -Index 1).Version
+        WriteInfo "`t VM Version is $($VMVersion.Build).$($VMVersion.Revision)"
+
         WriteInfo "`t Creating VM"
         if ($VMConfig.Generation -eq 1){
             $VMTemp=New-VM -Name $VMname -VHDPath $vhdpath -MemoryStartupBytes $VMConfig.MemoryStartupBytes -path "$LabFolder\VMs" -SwitchName $SwitchName -Generation 1
@@ -532,8 +532,16 @@ If (-not $isAdmin) {
 
         #configure number of processors
         if ($VMConfig.VMProcessorCount){
-            WriteInfo "`t Configuring VM Processor Count to $($VMConfig.VMProcessorCount)"
-            if ($VMConfig.VMProcessorCount -le $NumberOfLogicalProcessors){
+            if ($VMConfig.VMProcessorCount -eq "Max"){
+                if ($NumberOfLogicalProcessors -gt 64){
+                    WriteInfo "`t Processors Count $NumberOfLogicalProcessors and Max is specified. Configuring VM Processor Count to 64"
+                    $VMTemp | Set-VMProcessor -Count 64
+                }else{
+                    WriteInfo "`t Configuring VM Processor Count to Max ($NumberOfLogicalProcessors)"
+                    $VMTemp | Set-VMProcessor -Count $NumberOfLogicalProcessors
+                }
+            }elseif ($VMConfig.VMProcessorCount -le $NumberOfLogicalProcessors){
+                WriteInfo "`t Configuring VM Processor Count to $($VMConfig.VMProcessorCount)"
                 $VMTemp | Set-VMProcessor -Count $VMConfig.VMProcessorCount
             }else{
                 WriteError "`t`t Number of processors specified in VMProcessorCount is greater than Logical Processors available in Host!"
@@ -593,6 +601,16 @@ If (-not $isAdmin) {
             WriteInfo "`t`t No sync commands requested"
         }
 
+        if ($VMVersion.Build -ge 17763){
+            $oeminformation=@"
+            <OEMInformation>
+             <SupportProvider>WSLab</SupportProvider>
+             <SupportURL>https://aka.ms/wslab</SupportURL>
+           </OEMInformation>
+"@
+        }else{
+            $oeminformation=$null
+        }
         #configure native VLAN and AllowedVLANs
         WriteInfo "`t Configuring NativeVLAN and AllowedVLANs"
         if ($VMConfig.ManagementSubnetID -gt 0){
@@ -658,7 +676,7 @@ If (-not $isAdmin) {
         }
 
         # return info
-        @{
+        [PSCustomObject]@{
             OSDiskPath = $vhdpath
             VM = $VMTemp
         }
@@ -1375,7 +1393,7 @@ If (-not $isAdmin) {
 
     #process $labconfig.VMs and create VMs (skip if machine already exists)
         WriteInfoHighlighted 'Processing $LabConfig.VMs, creating VMs'
-        $provisionedVMsCount = 0
+        $provisionedVMs = @()
         foreach ($VMConfig in $LABConfig.VMs.GetEnumerator()){
             if (!(Get-VM -Name "$($labconfig.prefix)$($VMConfig.vmname)" -ErrorAction SilentlyContinue)){
                 $vmProvisioningStartTime = Get-Date
@@ -1515,7 +1533,7 @@ If (-not $isAdmin) {
                     $vmDeploymentEvents += $vmInfo
                 }
                 
-                $provisionedVMsCount += 1
+                $provisionedVMs += $createdVm.VM
             }
         }
 
@@ -1557,19 +1575,56 @@ If (-not $isAdmin) {
         WriteInfo "`t Enabling VMNics device naming"
         Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object Generation -eq 2 | Set-VMNetworkAdapter -DeviceNaming On
 
+    #Autostart VMs
+        $startVMs = 0
+        if($LabConfig.AutoStartAfterDeploy -eq $true -or $LabConfig.AutoStartAfterDeploy -eq "All") {
+            $startVMs = 1
+        } elseif($LabConfig.AutoStartAfterDeploy -eq "DeployedOnly") {
+            $startVMs = 2
+        }
+        
+        if(-not $LabConfig.ContainsKey("AutoStartAfterDeploy") -and $AllVMs.Count -gt 0) {
+            $options = [System.Management.Automation.Host.ChoiceDescription[]] @(
+                <# 0 #> New-Object System.Management.Automation.Host.ChoiceDescription "&No", "No VM will be started."
+                <# 1 #> New-Object System.Management.Automation.Host.ChoiceDescription "&All", "All VMs in the lab will be started."
+            )
+            
+            if($provisionedVMs.Count -gt 0) {
+                <# 2 #> $options += New-Object System.Management.Automation.Host.ChoiceDescription "&Deployed only", "Only newly deployed VMs will be started."
+            }
+            $startVMs = $host.UI.PromptForChoice("Start VMs", "Would you like to start lab virtual machines?", $options, 0 <#default option#>)
+        }
+        #Starting VMs
+        $toStart = @()
+        switch($startVMs) {
+            1 {
+                $toStart = $AllVMs
+            }
+            2 {
+                $toStart = $provisionedVMs
+            }
+        }
+        
+        if(($toStart | Measure-Object).Count -gt 0) {
+            WriteInfoHighlighted "Starting VMs"
+            $toStart | ForEach-Object { 
+                WriteInfo "`t $($_.Name)"
+                Start-VM -VM $_ -WarningAction SilentlyContinue
+            }
+        }
+
     # Telemetry Event
     if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
-        WriteInfo "`t Sending telemetry info"
+        WriteInfo "Sending telemetry info"
         $metrics = @{
             'script.duration' = [Math]::Round(((Get-Date) - $StartDateTime).TotalSeconds, 2)
-            'memory.available' = [Math]::Round($MemoryAvailableMB, 0)
             'lab.vmsCount.active' = ($AllVMs | Measure-Object).Count # how many VMs are running
-            'lab.vmsCount.provisioned' = $provisionedVMsCount # how many VMs were created by this script run
+            'lab.vmsCount.provisioned' = ($provisionedVMs | Measure-Object).Count # how many VMs were created by this script run
         }
         $properties = @{
-            'lab.timezone' = $TimeZone
             'lab.internet' = [bool]$LabConfig.Internet
             'lab.isncrementalDeployment' = $LABExists
+            'lab.autostartmode' = $startVMs
         }
         $telemetryEvent = New-TelemetryEvent -Event "Deploy.End" -Metrics $metrics -Properties $properties -NickName $LabConfig.TelemetryNickName
         $vmDeploymentEvents += $telemetryEvent

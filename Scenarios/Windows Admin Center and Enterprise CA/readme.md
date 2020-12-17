@@ -65,9 +65,8 @@ $LabConfig.VMs += @{ VMName = 'WACGWCert' ; ParentVHD = 'Win2019Core_G2.vhdx'; M
 > **Note:** All commands below should be executed from the `Win10` virtual machine that runs Windows 10.
 
 ```PowerShell
-$ProgressPreference='SilentlyContinue' #for faster download
 #Download Windows Admin Center to downloads
-    Invoke-WebRequest -UseBasicParsing -Uri https://aka.ms/WACDownload -OutFile "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
+    Start-BitsTransfer -Source https://aka.ms/WACDownload -Destination "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
 
 #Install Windows Admin Center (https://docs.microsoft.com/en-us/windows-server/manage/windows-admin-center/deploy/install)
     Start-Process msiexec.exe -Wait -ArgumentList "/i $env:USERPROFILE\Downloads\WindowsAdminCenter.msi /qn /L*v log.txt SME_PORT=6516 SSL_CERTIFICATE_OPTION=generate"
@@ -89,9 +88,7 @@ This just a quick way to setup WAC in GW mode for testing
 $GatewayServerName="WACGW"
 #Download Windows Admin Center if not present
 if (-not (Test-Path -Path "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi")){
-    $ProgressPreference='SilentlyContinue' #for faster download
-    Invoke-WebRequest -UseBasicParsing -Uri https://aka.ms/WACDownload -OutFile "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
-    $ProgressPreference='Continue' #return progress preference back
+    Start-BitsTransfer -Source https://aka.ms/WACDownload -Destination "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
 }
 #Create PS Session and copy install files to remote server
 Invoke-Command -ComputerName $GatewayServerName -ScriptBlock {Set-Item -Path WSMan:\localhost\MaxEnvelopeSizekb -Value 4096}
@@ -125,8 +122,7 @@ foreach ($computer in $computers){
 
 ```PowerShell
 #Install Edge
-$ProgressPreference='SilentlyContinue' #for faster download
-Invoke-WebRequest -Uri "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/40e309b4-5d46-4AE8-b839-bd74b4cff36e/MicrosoftEdgeEnterpriseX64.msi" -UseBasicParsing -OutFile "$env:USERPROFILE\Downloads\MicrosoftEdgeEnterpriseX64.msi"
+Start-BitsTransfer -Source "https://aka.ms/edge-msi" -Destination "$env:USERPROFILE\Downloads\MicrosoftEdgeEnterpriseX64.msi"
 #start install
 Start-Process -Wait -Filepath msiexec.exe -Argumentlist "/i $env:UserProfile\Downloads\MicrosoftEdgeEnterpriseX64.msi /q"
 #start Edge
@@ -361,7 +357,7 @@ $TemplateName = "WACGW"
 
 # Install PSPKI module for managing Certification Authority
 Install-PackageProvider -Name NuGet -Force
-Install-Module -Name PSPKI -Force
+Install-Module -Name PSPKI -Force -RequiredVersion 3.5  #explicit version because of this issue https://github.com/PKISolutions/PSPKI/issues/113
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
 Import-Module PSPKI
 
@@ -385,8 +381,7 @@ $GatewayServerName="WACGWCert"
 
 #Download Windows Admin Center if not present
 if (-not (Test-Path -Path "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi")){
-    $ProgressPreference='SilentlyContinue' #for faster download
-    Invoke-WebRequest -UseBasicParsing -Uri https://aka.ms/WACDownload -OutFile "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
+    Start-BitsTransfer -Source https://aka.ms/WACDownload -Destination "$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
 }
 
 #Create PS Session and copy install files to remote server
@@ -614,7 +609,7 @@ $Password = "LS1setup!"
 #make sure PSPKI is installed
     if (-not (Get-Module PSPKI)){
         Install-PackageProvider -Name NuGet -Forcet
-        Install-Module -Name PSPKI -Force
+        Install-Module -Name PSPKI -Force -RequiredVersion 3.5  #explicit version because of this issue https://github.com/PKISolutions/PSPKI/issues/113
         If ((Get-ExecutionPolicy) -eq "restricted"){
             Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
         }
@@ -640,8 +635,7 @@ Export-PfxCertificate -Cert $Certificate -FilePath $ExportPath -Password $Secure
 #Download Windows Admin Center if not present
 $Path="$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
 if (-not (Test-Path -Path $Path)){
-    $ProgressPreference='SilentlyContinue' #for faster download
-    Invoke-WebRequest -UseBasicParsing -Uri https://aka.ms/WACDownload -OutFile $Path
+    Start-BitsTransfer -Source https://aka.ms/WACDownload -Destination $Path
 }
 
 <#
@@ -879,7 +873,7 @@ $Password = "LS1setup!"
 #make sure PSPKI is installed
     if (-not (Get-Module PSPKI)){
         Install-PackageProvider -Name NuGet -Force
-        Install-Module -Name PSPKI -Force
+        Install-Module -Name PSPKI -Force -RequiredVersion 3.5  #explicit version because of this issue https://github.com/PKISolutions/PSPKI/issues/113
         If ((Get-ExecutionPolicy) -eq "restricted"){
             Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
         }
@@ -905,8 +899,7 @@ Export-PfxCertificate -Cert $Certificate -FilePath $ExportPath -Password $Secure
 #Download Windows Admin Center if not present
 $Path="$env:USERPROFILE\Downloads\WindowsAdminCenter.msi"
 if (-not (Test-Path -Path $Path)){
-    $ProgressPreference='SilentlyContinue' #for faster download
-    Invoke-WebRequest -UseBasicParsing -Uri https://aka.ms/WACDownload -OutFile $Path
+    Start-BitsTransfer -Source https://aka.ms/WACDownload -Destination $Path
 }
 
 <#
