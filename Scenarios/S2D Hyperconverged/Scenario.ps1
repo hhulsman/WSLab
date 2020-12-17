@@ -52,6 +52,7 @@ Write-host "Script started at $StartDateTime"
         $StorVLAN2=2
 
         $SRIOV=$true #Deploy SR-IOV enabled switch (best practice is to enable if possible)
+        $SRIOV=$false # HHH - no se puede avanzar, el físico no lo soporta por LbfoTeam
 
     #start IP for storage network
         $IP=1
@@ -65,6 +66,7 @@ Write-host "Script started at $StartDateTime"
 
     #Configure dcb? (more info at http://aka.ms/ConvergedRDMA)
         $DCB=$False #$true for ROCE, $false for iWARP
+        $DCB=$True  # HHH.
 
     #iWARP?
         $iWARP=$False
@@ -72,11 +74,12 @@ Write-host "Script started at $StartDateTime"
     #DisableNetBIOS on all vNICs? $True/$False It's optional. Works well with both settings default/disabled
         $DisableNetBIOS=$False
 
-    #Number of Disks Created. If >4 nodes, then x Mirror-Accelerated Parity and x Mirror disks are created
-        $NumberOfDisks=$numberofnodes
-
     #SMB Bandwith Limits for Live Migration? https://techcommunity.microsoft.com/t5/Failover-Clustering/Optimizing-Hyper-V-Live-Migrations-on-an-Hyperconverged/ba-p/396609
         $SMBBandwidthLimits=$true
+
+    #Jumbo Frames? Might be necessary to increase for iWARP. If not default, make sure all switches are configured end-to-end and (for example 9216). Also if non-default is set, you might run into various issues such as https://blog.workinghardinit.work/2019/09/05/fixing-slow-roce-rdma-performance-with-winof-2-to-winof/.
+    #if 1514 is set, setting JumboFrames is skipped. All NICs are configured (vNICs + pNICs)
+        $JumboSize=1514 #9014, 4088 or 1514 (default)
 
     #Additional Features
         $Bitlocker=$false #Install "Bitlocker" and "RSAT-Feature-Tools-BitLocker" on nodes?
@@ -107,8 +110,8 @@ Write-host "Script started at $StartDateTime"
         $MemoryDump="Active"
 
     #real VMs? If true, script will create real VMs on mirror disks from vhd you will provide during the deployment. The most convenient is to provide NanoServer
-        $realVMs=$false
-        $NumberOfRealVMs=2 #number of VMs on each mirror disk
+    $realVMs=$true # HHH. Nota: Conectar K: a \\ANIMC01\ClusterStorage$ antes, para poder seleccionar ParentDisk
+    $NumberOfRealVMs=2 #number of VMs on each mirror disk
 
     #ask for parent VHDx if real VMs will be created
         if ($realVMs){
@@ -125,6 +128,9 @@ Write-host "Script started at $StartDateTime"
             }
             $VHDPath = $openFile.FileName
         }
+
+    #Values for Test-Cluster # HHH, traducción
+    $TestClusterValues = "Storage Spaces Direct","Inventario","Red","Configuración del sistema","Configuración de Hyper-V"
 
 #endregion
 
@@ -387,6 +393,11 @@ Write-host "Script started at $StartDateTime"
                     Set-VMNetworkAdapterTeamMapping -VMNetworkAdapterName "SMB02" -ManagementOS -PhysicalNetAdapterName (get-netadapter -InterfaceDescription $physicaladapters[1]).name
                 }
 
+        #Configure Jumbo Frames
+            if ($JumboSize -ne 1514){
+                Set-NetAdapterAdvancedProperty -CimSession $Servers  -DisplayName "Jumbo Packet" -RegistryValue $JumboSize
+            }
+
         #Disable NetBIOS on all vNICs https://msdn.microsoft.com/en-us/library/aa393601(v=vs.85).aspx
             if ($DisableNetBIOS){
                 $vNICs = Get-NetAdapter -CimSession $Servers | Where-Object Name -like vEthernet*
@@ -401,7 +412,7 @@ Write-host "Script started at $StartDateTime"
                 }
             }
 
-        #Disable RCT on Physical NICs connected to vSwitch (RSC in the vSwitch (2019+ only) conflicts with NIC vendors implementation of RSC if they did it in software (miniport, not OS) rather than firmware. In Validate-DCB it's only for MLX4 drivers (Mellanox CX 3)
+        #Disable RSC (receive segment coalescing) on Physical NICs connected to vSwitch (RSC in the vSwitch (2019+ only) conflicts with NIC vendors implementation of RSC if they did it in software (miniport, not OS) rather than firmware. In Validate-DCB it's only for MLX4 drivers (Mellanox CX 3)
             Invoke-Command -ComputerName $servers -ScriptBlock {
                 $physicaladapters=(get-vmswitch $using:vSwitchName).NetAdapterInterfaceDescriptions
                 foreach ($physicaladapter in $physicaladapters){
@@ -422,6 +433,8 @@ Write-host "Script started at $StartDateTime"
             Get-NetAdapterRdma -CimSession $servers | Sort-Object -Property Systemname | ft systemname,interfacedescription,name,enabled -AutoSize -GroupBy Systemname
         #verify ip config 
             Get-NetIPAddress -CimSession $servers -InterfaceAlias vEthernet* -AddressFamily IPv4 | Sort-Object -Property PSComputername | ft pscomputername,interfacealias,ipaddress -AutoSize -GroupBy pscomputername
+        #verify JumboFrames
+            Get-NetAdapterAdvancedProperty -CimSession $servers -DisplayName "Jumbo Packet"
 
     #configure DCB if requested
         if ($DCB -eq $True){
@@ -454,7 +467,8 @@ Write-host "Script started at $StartDateTime"
                 Invoke-Command -ComputerName $servers -ScriptBlock {Get-NetQosDcbxSetting} | Sort-Object PSComputerName | Format-Table Willing,PSComputerName
 
             #Apply policy to the target adapters.  The target adapters are adapters connected to vSwitch
-                Invoke-Command -ComputerName $servers -ScriptBlock {Enable-NetAdapterQos -InterfaceDescription (Get-VMSwitch).NetAdapterInterfaceDescriptions}
+                # Invoke-Command -ComputerName $servers -ScriptBlock {Enable-NetAdapterQos -InterfaceDescription (Get-VMSwitch).NetAdapterInterfaceDescriptions}
+                # HHH Da error: NetAdapterInterfaceDescriptions no devuelve ningún valor
 
             #validate policy
                 Invoke-Command -ComputerName $servers -ScriptBlock {Get-NetAdapterQos | Where-Object enabled -eq true} | Sort-Object PSComputerName
@@ -474,7 +488,13 @@ Write-host "Script started at $StartDateTime"
 #endregion
 
 #region Create HyperConverged cluster and configure basic settings
-    Test-Cluster -Node $servers -Include "Storage Spaces Direct","Inventory","Network","System Configuration","Hyper-V Configuration"
+    # HHH Check build and revision numbers, otherwise Test-Cluster will fail
+    Invoke-Command -ComputerName $servers -ScriptBlock {Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' -Name UBR}
+
+    # Test-Cluster -Node $servers -Include "Storage Spaces Direct","Inventory","Network","System Configuration","Hyper-V Configuration"
+    Test-Cluster -Node $servers -ReportName "$($ENV:Temp)\TestClusterReport" -Include $TestClusterValues # HHH, traducción
+    Start-Process -FilePath "$($ENV:Temp)\TestClusterReport.htm" # HHH
+
     if ($ClusterIP){
         New-Cluster -Name $ClusterName -Node $servers -StaticAddress $ClusterIP
     }else{
@@ -500,7 +520,8 @@ Write-host "Script started at $StartDateTime"
             Invoke-Command -ComputerName DC -ScriptBlock {new-item -Path c:\Shares -Name $using:WitnessName -ItemType Directory}
             $accounts=@()
             $accounts+="corp\$ClusterName$"
-            $accounts+="corp\Domain Admins"
+            #$accounts+="corp\Domain Admins"
+            $accounts+="corp\Admins. del Dominio" # HHH
             New-SmbShare -Name $WitnessName -Path "c:\Shares\$WitnessName" -FullAccess $accounts -CimSession DC
         #Set NTFS permissions 
             Invoke-Command -ComputerName DC -ScriptBlock {(Get-SmbShare $using:WitnessName).PresetPathAcl | Set-Acl}
@@ -824,23 +845,25 @@ Write-host "Script started at $StartDateTime"
         $Switches=Get-VMSwitch -CimSession $servers -SwitchType External
 
         foreach ($switch in $switches){
-            $processor=Get-WmiObject win32_processor -ComputerName $switch.ComputerName | Select-Object -First 1
-            if ($processor.NumberOfCores -eq $processor.NumberOfLogicalProcessors/2){
-                $HT=$True
-            }
-            $adapters=@()
-            $switch.NetAdapterInterfaceDescriptions | ForEach-Object {$adapters+=Get-NetAdapterHardwareInfo -InterfaceDescription $_ -CimSession $switch.computername}
-            foreach ($adapter in $adapters){
-                $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors
-                if ($adapter.NumaNode -eq 0){
-                    if($HT){
-                        $BaseProcessorNumber=$BaseProcessorNumber+2
-                    }else{
-                        $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors+1
-                    }
+            if ($switch.DefaultQueueVmmqEnabled -eq $false){ #only if VMMQ does not work, let's make sure VMQ will not assign CPU 0
+                $processor=Get-WmiObject win32_processor -ComputerName $switch.ComputerName | Select-Object -First 1
+                if ($processor.NumberOfCores -eq $processor.NumberOfLogicalProcessors/2){
+                    $HT=$True
                 }
-                $adapter=Get-NetAdapter -InterfaceDescription $adapter.InterfaceDescription -CimSession $adapter.PSComputerName
-                $adapter | Set-NetAdapterVmq -BaseProcessorNumber $BaseProcessorNumber
+                $adapters=@()
+                $switch.NetAdapterInterfaceDescriptions | ForEach-Object {$adapters+=Get-NetAdapterHardwareInfo -InterfaceDescription $_ -CimSession $switch.computername}
+                foreach ($adapter in $adapters){
+                    $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors
+                    if ($adapter.NumaNode -eq 0){
+                        if($HT){
+                            $BaseProcessorNumber=$BaseProcessorNumber+2
+                        }else{
+                            $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors+1
+                        }
+                    }
+                    $adapter=Get-NetAdapter -InterfaceDescription $adapter.InterfaceDescription -CimSession $adapter.PSComputerName
+                    $adapter | Set-NetAdapterVmq -BaseProcessorNumber $BaseProcessorNumber
+                }
             }
         }
     }
@@ -876,7 +899,10 @@ Write-host "Script started at $StartDateTime"
                 $VMName="TestVM$($CSV)_$_"
                 New-Item -Path "\\$ClusterName\ClusterStorage$\$CSV\$VMName\Virtual Hard Disks" -ItemType Directory
                 Copy-Item -Path $VHDPath -Destination "\\$ClusterName\ClusterStorage$\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" 
-                New-VM -Name $VMName -MemoryStartupBytes 512MB -Generation 2 -Path "c:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -CimSession ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
+                # New-VM -Name $VMName -MemoryStartupBytes 512MB -Generation 2 -Path "c:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -CimSession ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
+                $RandomNode = ((Get-ClusterNode -Cluster $ClusterName).Name | Get-Random)
+                New-VM -Name $VMName -MemoryStartupBytes 4GB -Generation 2 -Path "C:\ClusterStorage\$CSV\" -VHDPath "c:\ClusterStorage\$CSV\$VMName\Virtual Hard Disks\$VMName.vhdx" -SwitchName $vSwitchName -CimSession $RandomNode # HHH
+                Set-VMProcessor -VMName $VMName -Count 4 -CimSession $RandomNode # HHH
                 Add-ClusterVirtualMachineRole -VMName $VMName -Cluster $ClusterName
             }
         }

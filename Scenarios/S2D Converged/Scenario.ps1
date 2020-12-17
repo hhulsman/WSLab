@@ -91,6 +91,10 @@ Write-host "Script started at $StartDateTime"
     #SMB Bandwith Limits for Live Migration? https://techcommunity.microsoft.com/t5/Failover-Clustering/Optimizing-Hyper-V-Live-Migrations-on-an-Hyperconverged/ba-p/396609
         $SMBBandwidthLimits=$true
 
+    #Jumbo Frames? Might be necessary to increase for iWARP. If not default, make sure all switches are configured end-to-end and (for example 9216). Also if non-default is set, you might run into various issues such as https://blog.workinghardinit.work/2019/09/05/fixing-slow-roce-rdma-performance-with-winof-2-to-winof/.
+    #if 1514 is set, setting JumboFrames is skipped. All NICs are configured (vNICs + pNICs)
+    $JumboSize=1514 #9014, 4088 or 1514 (default)
+
     #Additional Features in S2D Cluster
         $Bitlocker=$false #Install "Bitlocker" and "RSAT-Feature-Tools-BitLocker" on nodes?
         $StorageReplica=$false #Install "Storage-Replica" and "RSAT-Storage-Replica" on nodes?
@@ -322,6 +326,11 @@ Write-host "Script started at $StartDateTime"
             Set-VMNetworkAdapterTeamMapping -VMNetworkAdapterName "SMB02" -ManagementOS -PhysicalNetAdapterName (get-netadapter -InterfaceDescription $physicaladapters[1]).name
         }
 
+    #Configure Jumbo Frames
+    if ($JumboSize -ne 1514){
+        Set-NetAdapterAdvancedProperty -CimSession $AllServers  -DisplayName "Jumbo Packet" -RegistryValue $JumboSize
+    }
+
     #verify mapping
         Get-VMNetworkAdapterTeamMapping -CimSession $AllServers -ManagementOS | ft ComputerName,NetAdapterName,ParentAdapter 
     #Verify that the VlanID is set
@@ -330,6 +339,8 @@ Write-host "Script started at $StartDateTime"
         Get-NetAdapterRdma -CimSession $AllServers | Sort-Object -Property Systemname | ft systemname,interfacedescription,name,enabled -AutoSize -GroupBy Systemname
     #verify ip config 
         Get-NetIPAddress -CimSession $AllServers -InterfaceAlias vEthernet* -AddressFamily IPv4 | Sort-Object -Property PSComputername | ft pscomputername,interfacealias,ipaddress -AutoSize -GroupBy pscomputername
+    #verify JumboFrames
+        Get-NetAdapterAdvancedProperty -CimSession $AllServers -DisplayName "Jumbo Packet"
 
 
         if ($DCB -eq $True){
@@ -602,23 +613,25 @@ Write-host "Script started at $StartDateTime"
         $Switches=Get-VMSwitch -CimSession $AllServers -SwitchType External
 
         foreach ($switch in $switches){
-            $processor=Get-WmiObject win32_processor -ComputerName $switch.ComputerName | Select -First 1
-            if ($processor.NumberOfCores -eq $processor.NumberOfLogicalProcessors/2){
-                $HT=$True
-            }
-            $adapters=@()
-            $switch.NetAdapterInterfaceDescriptions | ForEach-Object {$adapters+=Get-NetAdapterHardwareInfo -InterfaceDescription $_ -CimSession $switch.computername}
-            foreach ($adapter in $adapters){
-                $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors
-                if ($adapter.NumaNode -eq 0){
-                    if($HT){
-                        $BaseProcessorNumber=$BaseProcessorNumber+2
-                    }else{
-                        $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors+1
-                    }
+            if ($switch.DefaultQueueVmmqEnabled -eq $false){ #only if VMMQ does not work, let's make sure VMQ will not assign CPU 0
+                $processor=Get-WmiObject win32_processor -ComputerName $switch.ComputerName | Select-Object -First 1
+                if ($processor.NumberOfCores -eq $processor.NumberOfLogicalProcessors/2){
+                    $HT=$True
                 }
-                $adapter=Get-NetAdapter -InterfaceDescription $adapter.InterfaceDescription -CimSession $adapter.PSComputerName
-                $adapter | Set-NetAdapterVmq -BaseProcessorNumber $BaseProcessorNumber
+                $adapters=@()
+                $switch.NetAdapterInterfaceDescriptions | ForEach-Object {$adapters+=Get-NetAdapterHardwareInfo -InterfaceDescription $_ -CimSession $switch.computername}
+                foreach ($adapter in $adapters){
+                    $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors
+                    if ($adapter.NumaNode -eq 0){
+                        if($HT){
+                            $BaseProcessorNumber=$BaseProcessorNumber+2
+                        }else{
+                            $BaseProcessorNumber=$adapter.NumaNode*$processor.NumberOfLogicalProcessors+1
+                        }
+                    }
+                    $adapter=Get-NetAdapter -InterfaceDescription $adapter.InterfaceDescription -CimSession $adapter.PSComputerName
+                    $adapter | Set-NetAdapterVmq -BaseProcessorNumber $BaseProcessorNumber
+                }
             }
         }
     }

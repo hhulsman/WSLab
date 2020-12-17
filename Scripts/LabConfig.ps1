@@ -1,12 +1,13 @@
-﻿#basic config for Windows Server 2016, that creates VMs for S2D Hyperconverged scenario https://github.com/Microsoft/WSLab/tree/master/Scenarios/S2D%20Hyperconverged
+﻿#basic config for Windows Server 2019, that creates VMs for S2D Hyperconverged scenario https://github.com/Microsoft/WSLab/tree/master/Scenarios/S2D%20Hyperconverged
 
-$LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'WSLab-'; SwitchName = 'LabSwitch'; DCEdition='4'; Internet=$true ; AdditionalNetworksConfig=@(); VMs=@()}
-#Windows Server 2019
-1..4 | ForEach-Object {$VMNames="S2D"; $LABConfig.VMs += @{ VMName = "$VMNames$_" ; Configuration = 'S2D' ; ParentVHD = 'Win2019Core_G2.vhdx'; SSDNumber = 0; SSDSize=800GB ; HDDNumber = 12; HDDSize= 4TB ; MemoryStartupBytes= 512MB }} 
-#Or Windows Server 2016
-#1..4 | ForEach-Object {$VMNames="S2D"; $LABConfig.VMs += @{ VMName = "$VMNames$_" ; Configuration = 'S2D' ; ParentVHD = 'Win2016Core_G2.vhdx'; SSDNumber = 0; SSDSize=800GB ; HDDNumber = 12; HDDSize= 4TB ; MemoryStartupBytes= 512MB }} 
-#Or Windows Server Insider (17744 DC will not finish building. To finish build, just login to DC instead of waiting forever)
-#1..4 | ForEach-Object {$VMNames="S2D"; $LABConfig.VMs += @{ VMName = "$VMNames$_" ; Configuration = 'S2D' ; ParentVHD = 'WinSrvInsiderCore_17744.vhdx'; SSDNumber = 0; SSDSize=800GB ; HDDNumber = 12; HDDSize= 4TB ; MemoryStartupBytes= 512MB }} 
+$LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'WSLab-' ; DCEdition='4'; Internet=$true ; AdditionalNetworksConfig=@(); VMs=@()}
+# Windows Server 2019
+1..4 | ForEach-Object {$VMNames="S2D"; $LABConfig.VMs += @{ VMName = "$VMNames$_" ; Configuration = 'S2D' ; ParentVHD = 'Win2019Core_G2.vhdx'; SSDNumber = 0; SSDSize=800GB ; HDDNumber = 12; HDDSize= 4TB ; MemoryStartupBytes= 512MB }}
+# Or Azure Stack HCI 
+#1..4 | ForEach-Object {$VMNames="S2D"; $LABConfig.VMs += @{ VMName = "$VMNames$_" ; Configuration = 'S2D' ; ParentVHD = 'AzSHCI20H2_G2.vhdx'; SSDNumber = 0; SSDSize=800GB ; HDDNumber = 12; HDDSize= 4TB ; MemoryStartupBytes= 1GB }}
+# Or Windows Server 2016
+#1..4 | ForEach-Object {$VMNames="S2D"; $LABConfig.VMs += @{ VMName = "$VMNames$_" ; Configuration = 'S2D' ; ParentVHD = 'Win2016Core_G2.vhdx'; SSDNumber = 0; SSDSize=800GB ; HDDNumber = 12; HDDSize= 4TB ; MemoryStartupBytes= 512MB }}
+
 
 ### HELP ###
 
@@ -17,8 +18,8 @@ $LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'W
     $LabConfig=@{
         DomainAdminName='LabAdmin';                  # Used during 2_CreateParentDisks (no affect if changed after this step)
         AdminPassword='LS1setup!';                   # Used during 2_CreateParentDisks. If changed after, it will break the functionality of 3_Deploy.ps1
-        Prefix = 'WSLab-';                           # All VMs and vSwitch are created with this prefix, so you can identify the lab
-        SwitchName = 'LabSwitch';                    # Name of vSwitch
+        Prefix = 'WSLab-';                           # (Optional) All VMs and vSwitch are created with this prefix, so you can identify the lab. If not specified, Lab folder name is used
+        SwitchName = 'LabSwitch';                    # (Optional) Name of vSwitch
         SecureBoot=$true;                            # (Optional) Useful when testing unsigned builds (Useful for MS developers for daily builds)
         DCEdition='4';                               # 4 for DataCenter or 3 for DataCenterCore
         InstallSCVMM='No';                           # (Optional) Yes/Prereqs/SQL/ADK/No
@@ -35,8 +36,10 @@ $LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'W
         ServerMSUsFolder="";                         # (Optional) If configured, script will inject all MSU files found into server OS
         EnableGuestServiceInterface=$false;          # (Optional) If True, then Guest Services integration component will be enabled on all VMs.
         DCVMProcessorCount=2;                        # (Optional) 2 is default. If specified more/less, processorcount will be modified.
-        DHCPscope="10.0.0.0"                         # (Optional) 10.0.0.0 is configured if nothing is specified. Scope has to end with .0 (like 10.10.10.0). It's always /24       
-        DCVMVersion="9.0"                            # (Optional) Latest is used if nothing is specified. Make sure you use values like "8.0","8.3","9.0"
+        DHCPscope="10.0.0.0";                        # (Optional) 10.0.0.0 is configured if nothing is specified. Scope has to end with .0 (like 10.10.10.0). It's always /24       
+        DCVMVersion="9.0";                           # (Optional) Latest is used if nothing is specified. Make sure you use values like "8.0","8.3","9.0"
+        TelemetryLevel="";                           # (Optional) If configured, script will stop prompting you for telemetry. Values are "None","Basic","Full"
+        TelemetryNickname="";                        # (Optional) If configured, telemetry will be sent with NickName to correlate data to specified NickName. So when leaderboards will be published, WSLab users will be able to see their own stats
         AdditionalNetworksConfig=@();                # Just empty array for config below
         VMs=@();                                     # Just empty array for config below
     }
@@ -77,8 +80,12 @@ $LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'W
     Password (Mandatory)
         Specifies password for your lab. This password is used for domain admin, vmm account, sqlservice account and additional DomainAdmin... Define before running 2_CreateParentImages
 
-    Prefix (Mandatory)
+    Prefix (Optional)
         Prefix for your lab. Each VM and switch will have this prefix.
+        If not specified, labfolder name will be used
+
+    SwitchName (Optional)
+        If not specified, LabSwitch will be used as switch name
 
     Secureboot (Optional)
         $True/$False
@@ -166,8 +173,18 @@ $LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'W
         If True, then Guest Services integration component will be enabled on all VMs. This allows simple file copy from host to guests.
 
     DCVMVersion
-        Example: DCVMVersion="8.0"
-        If set, version for DC will be used. It is useful if you want to keep DC older to be able to use it on previous versions of OS. 
+        Example: DCVMVersion="8.0" (optional)
+        If set, version for DC will be used. It is useful if you want to keep DC older to be able to use it on previous versions of OS.
+        
+    TelemetryLevel (optional)
+        Example: TelemetryLevel="Full"
+        If set, scripts will not prompt for telemetry. Can be "None","Basic","Full"
+        For more info see https://aka.ms/wslab/telemetry
+        
+    TelemetryNickname (optional)
+        Example: TelemetryNickname="Jaromirk"
+        If configured, telemetry will be sent with NickName to correlate data to specified NickName. So when leaderboards will be published, WSLab users will be able to see their own stats
+
     #>
 #endregion
 
@@ -263,15 +280,19 @@ $LabConfig=@{ DomainAdminName='LabAdmin'; AdminPassword='LS1setup!'; Prefix = 'W
     Generation (Optional)
         Example Generation=1
         If not specified, then it's 2. If 1, then its 1. Easy.
-    
+
     EnableWinRM (Optional)
         Example EnableWinRM=$True
         If $true, then synchronous command winrm quickconfig -force -q will be run
         Only useful for 2008 and Win10
-    
+
     CustomPowerShellCommands (Optional)
         Example (single command) CustomPowerShellCommands="New-Item -Name Temp -Path c:\ -ItemType Directory"
         Example (multiple commands) CustomPowerShellCommands="New-Item -Name Temp -Path c:\ -ItemType Directory","New-Item -Name Temp1 -Path c:\ -ItemType Directory"
+
+    ManagementSubnetID (Optional)
+        This will set Management NICs to defined subnet id by configuring native VLAN ID. Default is 0. If configured to 1, it will increase highest allowed VLAN by one and configure.
+        For example ManagementSubnetID=1, AllowedVlans=10, then ManagementSubnetID VLAN will be configured 11. 
 
     #>
 #endregion

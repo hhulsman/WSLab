@@ -1,40 +1,19 @@
 ﻿# Verify Running as Admin
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-If (!( $isAdmin )) {
+If (-not $isAdmin) {
     Write-Host "-- Restarting as Administrator" -ForegroundColor Cyan ; Start-Sleep -Seconds 1
-    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
+
+    if($PSVersionTable.PSEdition -eq "Core") {
+        Start-Process pwsh.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
+    } else {
+        Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
+    }
+
     exit
 }
 
 #region Functions
-
-    function WriteInfo($message){
-        Write-Host $message
-    }
-
-    function WriteInfoHighlighted($message){
-        Write-Host $message -ForegroundColor Cyan
-    }
-
-    function WriteSuccess($message){
-        Write-Host $message -ForegroundColor Green
-    }
-
-    function WriteWarning($message) {
-        Write-Host $message -ForegroundColor Yellow
-    }
-
-    function WriteError($message){
-        Write-Host $message -ForegroundColor Red
-    }
-
-    function WriteErrorAndExit($message){
-        Write-Host $message -ForegroundColor Red
-        Write-Host "Press enter to continue ..."
-        Stop-Transcript
-        Read-Host | Out-Null
-        Exit
-    }
+. $PSScriptRoot\0_Shared.ps1 # [!build-include-inline]
 
     Function CreateUnattendFileBlob{
         #Create Unattend (parameter is Blob)
@@ -87,7 +66,8 @@ If (!( $isAdmin )) {
   </settings>
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <RegisteredOwner>PFE</RegisteredOwner>
+    <!-- HHH 4 lines deleted, OEM information, throws an error in W2016 at startup of VMs-->
+    <RegisteredOwner>PFE</RegisteredOwner>
       <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
     <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -135,8 +115,12 @@ If (!( $isAdmin )) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
+        <OEMInformation>
+          <SupportProvider>WSLab</SupportProvider>
+          <SupportURL>https://aka.ms/wslab</SupportURL>
+        </OEMInformation>
         <RegisteredOwner>PFE</RegisteredOwner>
-          <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
+        <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
     <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <RunSynchronous>
@@ -178,6 +162,9 @@ If (!( $isAdmin )) {
             $ComputerName,
             [parameter(Mandatory=$true)]
             [string]
+            $LocalAdminUser, # HHH
+            [parameter(Mandatory=$true)]
+            [string]
             $AdminPassword,
             [parameter(Mandatory=$true)]
             [string]
@@ -199,6 +186,10 @@ If (!( $isAdmin )) {
  <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <ComputerName>$Computername</ComputerName>
+        <OEMInformation>
+          <SupportProvider>WSLab</SupportProvider>
+          <SupportURL>https://aka.ms/wslab</SupportURL>
+        </OEMInformation>
         <RegisteredOwner>PFE</RegisteredOwner>
         <RegisteredOrganization>PFE Inc.</RegisteredOrganization>
     </component>
@@ -212,7 +203,7 @@ If (!( $isAdmin )) {
                 <Credentials>
                     <Domain>$DomainName</Domain>
                     <Password>$AdminPassword</Password>
-                    <Username>Administrator</Username>
+                    <Username>$LocalAdminUser</Username>
                 </Credentials>
                 <JoinDomain>$DomainName</JoinDomain>
         </Identification>
@@ -251,6 +242,9 @@ If (!( $isAdmin )) {
             $AdminPassword,
             [parameter(Mandatory=$true)]
             [string]
+            $LocalAdminGroup, # HHH
+            [parameter(Mandatory=$true)]
+            [string]
             $AdditionalAdminName
         )
 @"
@@ -262,7 +256,7 @@ If (!( $isAdmin )) {
         </Password>
         <Description>$AdditionalAdminName admin account</Description>
         <DisplayName>$AdditionalAdminName</DisplayName>
-        <Group>Administrators</Group>
+        <Group>$LocalAdminGroup</Group>
         <Name>$AdditionalAdminName</Name>
     </LocalAccount>
 </LocalAccounts>
@@ -270,7 +264,7 @@ If (!( $isAdmin )) {
     }
 
     function  Get-WindowsBuildNumber { 
-        $os = Get-WmiObject -Class Win32_OperatingSystem 
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem
         return [int]($os.BuildNumber) 
     } 
 
@@ -315,45 +309,44 @@ If (!( $isAdmin )) {
             [Switch]$Dhcp
         )
 
-        $VM = Get-WmiObject -Namespace 'root\virtualization\v2' -Class 'Msvm_ComputerSystem' | Where-Object { $_.ElementName -eq $NetworkAdapter.VMName } 
-        $VMSettings = $vm.GetRelated('Msvm_VirtualSystemSettingData') | Where-Object { $_.VirtualSystemType -eq 'Microsoft:Hyper-V:System:Realized' }    
-        $VMNetAdapters = $VMSettings.GetRelated('Msvm_SyntheticEthernetPortSettingData') 
+        $VM = Get-CimInstance -Namespace "root\virtualization\v2" -ClassName "Msvm_ComputerSystem" | Where-Object ElementName -eq $NetworkAdapter.VMName 
+        $VMSettings = Get-CimAssociatedInstance -InputObject $vm -ResultClassName "Msvm_VirtualSystemSettingData" | Where-Object VirtualSystemType -EQ "Microsoft:Hyper-V:System:Realized"
+        $VMNetAdapters = Get-CimAssociatedInstance -InputObject $VMSettings -ResultClassName "Msvm_SyntheticEthernetPortSettingData"
 
-        $NetworkSettings = @()
-        foreach ($NetAdapter in $VMNetAdapters) {
-            if ($NetAdapter.elementname -eq $NetworkAdapter.name) {
-                $NetworkSettings = $NetworkSettings + $NetAdapter.GetRelated("Msvm_GuestNetworkAdapterConfiguration")
+        $networkAdapterConfiguration = @()
+        foreach ($netAdapter in $VMNetAdapters) {
+            if ($netAdapter.ElementName -eq $NetworkAdapter.Name) {
+                $networkAdapterConfiguration = Get-CimAssociatedInstance -InputObject $netAdapter -ResultClassName "Msvm_GuestNetworkAdapterConfiguration"
+                break
             }
         }
 
-        $NetworkSettings[0].IPAddresses = $IPAddress
-        $NetworkSettings[0].Subnets = $Subnet
-        $NetworkSettings[0].DefaultGateways = $DefaultGateway
-        $NetworkSettings[0].DNSServers = $DNSServer
-        $NetworkSettings[0].ProtocolIFType = 4096
+        $networkAdapterConfiguration.PSBase.CimInstanceProperties["IPAddresses"].Value = $IPAddress
+        $networkAdapterConfiguration.PSBase.CimInstanceProperties["Subnets"].Value = $Subnet
+        $networkAdapterConfiguration.PSBase.CimInstanceProperties["DefaultGateways"].Value = $DefaultGateway
+        $networkAdapterConfiguration.PSBase.CimInstanceProperties["DNSServers"].Value = $DNSServer
+        $networkAdapterConfiguration.PSBase.CimInstanceProperties["ProtocolIFType"].Value = 4096
 
         if ($dhcp) {
-            $NetworkSettings[0].DHCPEnabled = $true
+            $networkAdapterConfiguration.PSBase.CimInstanceProperties["DHCPEnabled"].Value = $true
         } else {
-            $NetworkSettings[0].DHCPEnabled = $false
+            $networkAdapterConfiguration.PSBase.CimInstanceProperties["DHCPEnabled"].Value = $false
         }
 
-        $Service = Get-WmiObject -Class "Msvm_VirtualSystemManagementService" -Namespace "root\virtualization\v2"
-        $setIP = $Service.SetGuestNetworkAdapterConfiguration($VM, $NetworkSettings[0].GetText(1))
+        $cimSerializer = [Microsoft.Management.Infrastructure.Serialization.CimSerializer]::Create()
+        $serializedInstance = $cimSerializer.Serialize($networkAdapterConfiguration, [Microsoft.Management.Infrastructure.Serialization.InstanceSerializationOptions]::None)
+        $serializedInstanceString = [System.Text.Encoding]::Unicode.GetString($serializedInstance)
 
-        if ($setip.ReturnValue -eq 4096) {
-            $job=[WMI]$setip.job 
-            while ($job.JobState -eq 3 -or $job.JobState -eq 4) {
-                start-sleep 1
-                $job=[WMI]$setip.job
-            }
-            if ($job.JobState -eq 7) {
-                WriteInfoHighlighted "`t Success"
-            }else {
-            $job.GetError()
-            }
-        }elseif($setip.ReturnValue -eq 0) {
-            WriteInfoHighlighted "`t Success"
+        $service = Get-CimInstance -ClassName "Msvm_VirtualSystemManagementService" -Namespace "root\virtualization\v2"
+        $setIp = Invoke-CimMethod -InputObject $service -MethodName "SetGuestNetworkAdapterConfiguration" -Arguments @{
+            ComputerSystem = $VM
+            NetworkConfiguration = @($serializedInstanceString)
+        }
+        if($setIp.ReturnValue -eq 0) { # completed
+            WriteInfo "`t`t Success"
+        } else {
+            # unexpected response
+            $setIp
         }
     }
 
@@ -426,7 +419,15 @@ If (!( $isAdmin )) {
         )
         WriteInfoHighlighted "Creating VM $($VMConfig.VMName)"
         WriteInfo "`t Looking for Parent Disk"
-        $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        # $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        # Begin HHH
+        # Use ServerParentPath in case of multiple labs over one set of parentdisks
+        if ($LabConfig.ServerParentPath){
+            $serverparent=Get-ChildItem $LabConfig.ServerParentPath -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        }else{
+            $serverparent=Get-ChildItem "$PSScriptRoot\ParentDisks\" -Recurse | Where-Object Name -eq $VMConfig.ParentVHD
+        }
+        # End HHH
             
         if ($serverparent -eq $null){
             WriteErrorAndExit "Server parent disk $($VMConfig.ParentVHD) not found."
@@ -440,7 +441,7 @@ If (!( $isAdmin )) {
         }elseif($serverparent.Extension -eq ".vhd"){
             $vhdpath="$LabFolder\VMs\$VMname\Virtual Hard Disks\$VMname.vhd"
         }
-        WriteInfo "`t Creating OS VHD"
+        WriteInfoHighlighted "`t Creating OS VHD"
         New-VHD -ParentPath $serverparent.fullname -Path $vhdpath
         WriteInfo "`t Creating VM"
         if ($VMConfig.Generation -eq 1){
@@ -478,9 +479,9 @@ If (!( $isAdmin )) {
         }
 
         if ($VMConfig.AdditionalNetworks -eq $True){
-            WriteInfoHighlighted "`t Configuring Additional networks"
+            WriteInfo "`t Configuring Additional networks"
             foreach ($AdditionalNetworkConfig in $Labconfig.AdditionalNetworksConfig){
-                WriteInfo "`t Adding Adapter $($AdditionalNetworkConfig.NetName) with IP $($AdditionalNetworkConfig.NetAddress)$global:IP"
+                WriteInfo "`t`t Adding Adapter $($AdditionalNetworkConfig.NetName) with IP $($AdditionalNetworkConfig.NetAddress)$global:IP"
                 $VMTemp | Add-VMNetworkAdapter -SwitchName $SwitchName -Name $AdditionalNetworkConfig.NetName
                 $VMTemp | Get-VMNetworkAdapter -Name $AdditionalNetworkConfig.NetName  | Set-VMNetworkConfiguration -IPAddress "$($AdditionalNetworkConfig.NetAddress)$global:IP" -Subnet $AdditionalNetworkConfig.Subnet
                 if($AdditionalNetworkConfig.NetVLAN -ne 0){ $VMTemp | Get-VMNetworkAdapter -Name $AdditionalNetworkConfig.NetName | Set-VMNetworkAdapterVlan -VlanId $AdditionalNetworkConfig.NetVLAN -Access }
@@ -517,7 +518,7 @@ If (!( $isAdmin )) {
         if ($VMConfig.MemoryMinimumBytes -ne $null){
             WriteInfo "`t Configuring MemoryMinimumBytes to $($VMConfig.MemoryMinimumBytes/1MB)MB"
             if ($VMConfig.NestedVirt){
-                "`t `t Skipping! NestedVirt configured"
+                "`t`t Skipping! NestedVirt configured"
             }else{
                 Set-VM -VM $VMTemp -MemoryMinimumBytes $VMConfig.MemoryMinimumBytes
             }
@@ -535,10 +536,10 @@ If (!( $isAdmin )) {
             if ($VMConfig.VMProcessorCount -le $NumberOfLogicalProcessors){
                 $VMTemp | Set-VMProcessor -Count $VMConfig.VMProcessorCount
             }else{
-                WriteError "`t `t Number of processors specified in VMProcessorCount is greater than Logical Processors available in Host!"
-                WriteInfo  "`t `t Number of logical Processors in Host $NumberOfLogicalProcessors"
-                WriteInfo  "`t `t Number of Processors provided in labconfig $($VMConfig.VMProcessorCount)"
-                WriteInfo  "`t `t Will configure maximum processors possible instead ($NumberOfLogicalProcessors)"
+                WriteError "`t`t Number of processors specified in VMProcessorCount is greater than Logical Processors available in Host!"
+                WriteInfo  "`t`t Number of logical Processors in Host $NumberOfLogicalProcessors"
+                WriteInfo  "`t`t Number of Processors provided in labconfig $($VMConfig.VMProcessorCount)"
+                WriteInfo  "`t`t Will configure maximum processors possible instead ($NumberOfLogicalProcessors)"
                 $VMTemp | Set-VMProcessor -Count $NumberOfLogicalProcessors
             }
         }else{
@@ -547,7 +548,7 @@ If (!( $isAdmin )) {
 
         $Name=$VMConfig.VMName
         #add run synchronous commands
-        WriteInfoHighlighted "`t Adding Sync Commands"
+        WriteInfo "`t Adding Sync Commands"
         $RunSynchronous=""
         if ($VMConfig.EnableWinRM){
             $RunSynchronous+=@'
@@ -558,7 +559,7 @@ If (!( $isAdmin )) {
             </RunSynchronousCommand>
 
 '@
-            WriteInfo "`t `t WinRM will be enabled"
+            WriteInfo "`t`t WinRM will be enabled"
         }
 
         if ($VMConfig.DisableWCF){
@@ -570,7 +571,7 @@ If (!( $isAdmin )) {
             </RunSynchronousCommand>
 
 '@
-            WriteInfo "`t `t WCF will be disabled"
+            WriteInfo "`t`t WCF will be disabled"
         }
         if ($VMConfig.CustomPowerShellCommands){
             $Order=3
@@ -585,11 +586,22 @@ If (!( $isAdmin )) {
 "@
                 $Order++
             }
-            WriteInfo "`t `t Custom PowerShell command will be added"
+            WriteInfo "`t`t Custom PowerShell command will be added"
         }
 
         if (-not $RunSynchronous){
-            WriteInfo "`t `t No sync commands requested"
+            WriteInfo "`t`t No sync commands requested"
+        }
+
+        #configure native VLAN and AllowedVLANs
+        WriteInfo "`t Configuring NativeVLAN and AllowedVLANs"
+        if ($VMConfig.ManagementSubnetID -gt 0){
+            $NativeVlanId=($HighestVLAN+$VMConfig.ManagementSubnetID)
+            WriteInfo "`t`t Subnet ID is $($VMConfig.ManagementSubnetID) with NativeVLAN $NativeVLanID. AllowedVLANIDList is $($LabConfig.AllowedVLANs),$NativeVLANID"
+            $VMTemp | Set-VMNetworkAdapterVlan -VMNetworkAdapterName "Management*" -Trunk -NativeVlanId $NativeVlanId -AllowedVlanIdList "$($LabConfig.AllowedVLANs),$NativeVLANID"
+        }else{
+            WriteInfo "`t`t Subnet ID is 0 with NativeVLAN 0. AllowedVlanIDList is $($LabConfig.AllowedVLANs)"
+            $VMTemp | Set-VMNetworkAdapterVlan -VMNetworkAdapterName "Management*" -Trunk -NativeVlanId 0 -AllowedVlanIdList "$($LabConfig.AllowedVLANs)"
         }
 
         #Create Unattend file
@@ -598,16 +610,16 @@ If (!( $isAdmin )) {
             if ($VMConfig.AdditionalLocalAdmin){
                 WriteInfo "`t Additional Local Admin $($VMConfig.AdditionalLocalAdmin) will be added"
                 $AdditionalLocalAccountXML=AdditionalLocalAccountXML -AdditionalAdminName $VMConfig.AdditionalLocalAdmin -AdminPassword $LabConfig.AdminPassword
-                $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -AdditionalAccount $AdditionalLocalAccountXML -TimeZone $TimeZone
+                $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -LocalAdminGroup $LabConfig.LocalAdminGroup -AdditionalAccount $AdditionalLocalAccountXML -TimeZone $TimeZone
             }else{
                 $unattendfile=CreateUnattendFileNoDjoin -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -RunSynchronous $RunSynchronous -TimeZone $TimeZone
             }
         }elseif($VMConfig.Win2012Djoin -or $VMConfig.Unattend -eq "DjoinCred"){
-            WriteInfo "`t Creating Unattend with win2012-ish domain join"
-            $unattendfile=CreateUnattendFileWin2012 -ComputerName $Name -AdminPassword $LabConfig.AdminPassword -DomainName $Labconfig.DomainName -RunSynchronous $RunSynchronous -TimeZone $TimeZone
+            WriteInfoHighlighted "`t Creating Unattend with win2012-ish domain join"
+            $unattendfile=CreateUnattendFileWin2012 -ComputerName $Name -LocalAdminUser $LabConfig.LocalAdminUser -AdminPassword $LabConfig.AdminPassword -DomainName $Labconfig.DomainName -RunSynchronous $RunSynchronous -TimeZone $TimeZone
 
         }elseif($VMConfig.Unattend -eq "DjoinBlob" -or -not ($VMConfig.Unattend)){
-            WriteInfo "`t Creating Unattend with djoin blob"
+            WriteInfoHighlighted "`t Creating Unattend with djoin blob"
             $path="c:\$vmname.txt"
             Invoke-Command -VMGuid $DC.id -Credential $cred  -ScriptBlock {param($Name,$path,$Labconfig); djoin.exe /provision /domain $labconfig.DomainNetbiosName /machine $Name /savefile $path /machineou "OU=$($Labconfig.DefaultOUName),$($Labconfig.DN)"} -ArgumentList $Name,$path,$Labconfig
             $blob=Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {param($path); get-content $path} -ArgumentList $path
@@ -620,22 +632,22 @@ If (!( $isAdmin )) {
         #adding unattend to VHD
         if ($unattendFile){
             WriteInfo "`t Adding unattend to VHD"
-            Mount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -ImagePath $VHDPath -Index 1
-            Use-WindowsUnattend -Path "$PSScriptRoot\Temp\mountdir" -UnattendPath $unattendFile 
-            #&"$PSScriptRoot\Tools\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$PSScriptRoot\Temp\Mountdir
-            #&"$PSScriptRoot\Tools\dism\dism" /image:$PSScriptRoot\Temp\Mountdir /Apply-Unattend:$unattendfile
-            New-item -type directory $PSScriptRoot\Temp\Mountdir\Windows\Panther -ErrorAction Ignore
-            Copy-Item $unattendfile $PSScriptRoot\Temp\Mountdir\Windows\Panther\unattend.xml
+            Mount-WindowsImage -Path $mountdir -ImagePath $VHDPath -Index 1
+            Use-WindowsUnattend -Path $mountdir -UnattendPath $unattendFile 
+            #&"$PSScriptRoot\Tools\dism\dism" /mount-image /imagefile:$vhdpath /index:1 /MountDir:$mountdir
+            #&"$PSScriptRoot\Tools\dism\dism" /image:$mountdir /Apply-Unattend:$unattendfile
+            New-item -type directory "$mountdir\Windows\Panther" -ErrorAction Ignore
+            Copy-Item $unattendfile "$mountdir\Windows\Panther\unattend.xml"
         }
 
         if ($VMConfig.DSCMode -eq 'Pull'){
             WriteInfo "`t Adding metaconfig.mof to VHD"
-            Copy-Item "$PSScriptRoot\temp\dscconfig\$name.meta.mof" -Destination "$PSScriptRoot\Temp\Mountdir\Windows\system32\Configuration\metaconfig.mof"
+            Copy-Item "$PSScriptRoot\temp\dscconfig\$name.meta.mof" -Destination "$mountdir\Windows\system32\Configuration\metaconfig.mof"
         }
 
         if ($unattendFile){
-            Dismount-WindowsImage -Path "$PSScriptRoot\Temp\mountdir" -Save
-            #&"$PSScriptRoot\Tools\dism\dism" /Unmount-Image /MountDir:$PSScriptRoot\Temp\Mountdir /Commit
+            Dismount-WindowsImage -Path $mountdir -Save
+            #&"$PSScriptRoot\Tools\dism\dism" /Unmount-Image /MountDir:$mountdir /Commit
         }
 
         #add toolsdisk
@@ -644,6 +656,12 @@ If (!( $isAdmin )) {
             WriteInfoHighlighted "`t Adding Virtual Hard Disk $($VHD.Path)"
             $VMTemp | Add-VMHardDiskDrive -Path $vhd.Path
         }
+
+        # return info
+        @{
+            OSDiskPath = $vhdpath
+            VM = $VMTemp
+        }
     }
 #endregion
 
@@ -651,13 +669,29 @@ If (!( $isAdmin )) {
 
     Start-Transcript -Path "$PSScriptRoot\Deploy.log"
 
-    $StartDateTime = get-date
+    $StartDateTime = Get-Date
     WriteInfoHighlighted "Script started at $StartDateTime"
+    WriteInfo "`nWSLab Version $wslabVersion"
 
 
     ##Load LabConfig....
         . "$PSScriptRoot\LabConfig.ps1"
 
+    # Telemetry
+        if(-not (Get-TelemetryLevel)) {
+            $telemetryLevel = Read-TelemetryLevel
+            $LabConfig.TelemetryLevel = $telemetryLevel
+            $LabConfig.TelemetryLevelSource = "Prompt"
+            $promptShown = $true
+        }
+
+        if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
+            if(-not $promptShown) {
+                WriteInfo "Telemetry is set to $(Get-TelemetryLevel) level from $(Get-TelemetryLevelSource)"
+            }
+            Send-TelemetryEvent -Event "Deploy.Start" -NickName $LabConfig.TelemetryNickName | Out-Null
+        }
+    
 #endregion
 
 #region Set variables
@@ -674,6 +708,24 @@ If (!( $isAdmin )) {
         $LabConfig.DefaultOUName="Workshop"
     }
 
+    if (!$Labconfig.AllowedVLANs){
+        $Labconfig.AllowedVLANs="1-10"
+    }
+
+    # Begin HHH
+    If (!$LabConfig.LocalAdminUser){
+        $LabConfig.LocalAdminUser="Administrator"
+    }
+
+    If (!$LabConfig.LocalAdminGroup){
+        $LabConfig.LocalAdminGroup="Administrators"
+    }
+
+    If (!$LabConfig.GuestServiceInterfaceName){
+        $LabConfig.GuestServiceInterfaceName="Guest Service Interface"
+    }
+    # End HHH
+
     $DN=$null
     $LabConfig.DomainName.Split(".") | ForEach-Object {
         $DN+="DC=$_,"
@@ -681,6 +733,14 @@ If (!( $isAdmin )) {
     $LabConfig.DN=$DN.TrimEnd(",")
 
     $global:IP=1
+
+    if (!$LabConfig.Prefix){
+        $labconfig.prefix="$($PSScriptRoot | Split-Path -Leaf)-"
+    }
+
+    if (!$LabConfig.SwitchName){
+        $LabConfig.SwitchName = 'LabSwitch'
+    }
 
     WriteInfoHighlighted "List of variables used"
     WriteInfo "`t Prefix used in lab is $($labconfig.prefix)"
@@ -701,16 +761,18 @@ If (!( $isAdmin )) {
     $TimeZone=(Get-TimeZone).id
 
     #Grab number of processors
-    (get-wmiobject win32_processor).NumberOfLogicalProcessors  | ForEach-Object { $global:NumberOfLogicalProcessors += $_}
+    Get-CimInstance -ClassName "win32_processor" | ForEach-Object { $global:NumberOfLogicalProcessors += $_.NumberOfLogicalProcessors }
+
+    #Calculate highest VLAN (for additional subnets)
+    [int]$HighestVLAN=$LabConfig.AllowedVLANs -split "," -split "-" | Select  -Last 1
+
+    #Grab defined Management Subnet IDs and ignore 0
+    $ManagementSubnetIDs=$labconfig.vms.ManagementSubnetID | Select-Object -Unique | Sort-Object | Where-Object {$_ -ne 0}
+    WriteInfo "`t Requested ManagementSubnetIDs: $ManagementSubnetIDs"
 
 #endregion
 
 #region Some Additional checks and prereqs configuration
-
-    #checking if Prefix is not empty
-        if (!$LabConfig.Prefix){
-            WriteErrorAndExit "`t Prefix is empty. Exiting"
-        }
 
     # Checking for Compatible OS
         WriteInfoHighlighted "Checking if OS is Windows 10 1511 (10586)/Server 2016 or newer"
@@ -759,7 +821,7 @@ If (!( $isAdmin )) {
             WriteInfoHighlighted "Configuration contains Shared or Replica scenario"
 
             WriteInfo "Checking support for shared disks"
-            $OS=Get-WmiObject win32_operatingsystem
+            $OS = Get-CimInstance -ClassName "win32_operatingsystem"
             if (($OS.caption -like "*Server*") -and $OS.version -gt 10){
                 WriteInfo "`t Installing Failover Clustering Feature"
                 $FC=Install-WindowsFeature Failover-Clustering
@@ -803,6 +865,34 @@ If (!( $isAdmin )) {
             WriteErrorAndExit "`t Hyper-V tools are not installed. Please install Hyper-V management tools. Exiting"
         }
 
+    #Check if at least 2GB (+200Mb just to be sure) memory is available
+        WriteInfoHighlighted "Checking if at least 2GB RAM is available"
+        $MemoryAvailableMB=(Get-Ciminstance Win32_OperatingSystem).FreePhysicalMemory/1KB
+        if ($MemoryAvailableMB -gt (2048+200)){
+            WriteSuccess "`t $("{0:n0}" -f $MemoryAvailableMB) MB RAM Available"
+        }else{
+            WriteErrorAndExit "`t Please make sure you have at least 2 GB available memory. Exiting"
+        }
+
+    #check if filesystem on volume is NTFS or ReFS
+    WriteInfoHighlighted "Checking if volume filesystem is NTFS or ReFS"
+    $driveletter=$PSScriptRoot -split ":" | Select-Object -First 1
+    if ($PSScriptRoot -like "c:\ClusterStorage*"){
+        WriteSuccess "`t Volume Cluster Shared Volume. Mountdir will be $env:Temp\WSLAbMountdir" 
+        $mountdir="$env:Temp\WSLAbMountDir"
+        $VolumeFileSystem="CSVFS"
+    }else{
+        $mountdir="$PSScriptRoot\Temp\MountDir"
+        $VolumeFileSystem=(Get-Volume -DriveLetter $driveletter).FileSystemType
+        if ($VolumeFileSystem -match "NTFS"){
+            WriteSuccess "`t Volume filesystem is $VolumeFileSystem"
+        }elseif ($VolumeFileSystem -match "ReFS") {
+            WriteSuccess "`t Volume filesystem is $VolumeFileSystem"
+        }else {
+            WriteErrorAndExit "`t Volume filesystem is $VolumeFileSystem. Must be NTFS or ReFS. Exiting"
+        }
+    }
+
     #enable EnableEnhancedSessionMode if not enabled
     if (-not (Get-VMHost).EnableEnhancedSessionMode){
         WriteInfoHighlighted "Enhanced session mode was disabled. Enabling."
@@ -810,7 +900,6 @@ If (!( $isAdmin )) {
     }
 
     #Create Switches
-
         WriteInfoHighlighted "Creating Switch"
         WriteInfo "`t Checking if $SwitchName already exists..."
 
@@ -819,7 +908,7 @@ If (!( $isAdmin )) {
             New-VMSwitch -SwitchType Private -Name $SwitchName
         }else{
             $SwitchNameExists=$True
-            WriteInfoHighlighted "`t $SwitchName exists. Looks like lab with same prefix exists. "
+            WriteInfo "`t $SwitchName exists. Looks like lab with same prefix exists. "
         }
 
     #connect lab to internet if specified in labconfig
@@ -832,6 +921,25 @@ If (!( $isAdmin )) {
 
             WriteInfo "`t Detecting default vSwitch"
             $DefaultSwitch=Get-VMSwitch -ID c08cb7b8-9b3c-408e-8e30-5e16a3aeb444 -ErrorAction Ignore
+            if ($DefaultSwitch){WriteInfo "`t Default switch detected"}
+
+            #if running in Azure and default switch is not present, create InternalNAT Switch
+            If ((Get-CimInstance win32_systemenclosure).SMBIOSAssetTag -eq "7783-7084-3265-9085-8269-3286-77" -and !$DefaultSwitch){
+                #https://docs.microsoft.com/en-us/azure/virtual-machines/windows/nested-virtualization#set-up-internet-connectivity-for-the-guest-virtual-machine
+                WriteInfoHighlighted "`t Lab is running in Azure and default switch not detected"
+                if (Get-VMSwitch -name "InternalNat" -ErrorAction Ignore){
+                    WriteInfo "`t vSwitch InternalNat detected, skipping creation"
+                    $DefaultSwitch=Get-VMSwitch -Name "InternalNAT"
+                }else{
+                    WriteInfo "`t Creating vSwitch `"InternalNat`""
+                    $DefaultSwitch=New-VMSwitch -Name "InternalNAT" -SwitchType Internal
+                    WriteInfo "`t Assigning IP address 192.168.0.1 to interface `"vEthernet (InternalNAT)`""
+                    New-NetIPAddress -IPAddress 192.168.0.1 -PrefixLength 24 -InterfaceAlias "vEthernet (InternalNAT)"
+                    WriteInfo "`t Assigning IP address 192.168.0.1 to interface `"vEthernet (InternalNAT)`""
+                    New-NetNat -Name "InternalNat" -InternalIPInterfaceAddressPrefix 192.168.0.0/24
+                }
+            }
+
             if (-not $DefaultSwitch){
                 WriteInfo "`t Default switch not present, detecting external vSwitch $ExternalSwitchName"
                 $ExternalSwitch=Get-VMSwitch -SwitchType External -Name $ExternalSwitchName -ErrorAction Ignore
@@ -873,11 +981,14 @@ If (!( $isAdmin )) {
         }
 
     #Testing if lab already exists.
-        WriteInfo "Testing if lab already exists."
+        WriteInfoHighlighted "Checking if lab already exists."
+        $LABExists=$false
         if ($SwitchNameExists){
             if ((Get-vm -Name ($labconfig.prefix+"DC") -ErrorAction SilentlyContinue) -ne $null){
-                $LABExists=$True
-                WriteInfoHighlighted "`t Lab already exists. If labconfig contains additional VMs, they will be added."
+                $LABExists=$true
+                WriteInfo "`t Lab already exists. If labconfig contains additional VMs, they will be added."
+            }else{
+                WriteInfo "`t Lab does not exist, will be created"
             }
         }
 
@@ -892,18 +1003,26 @@ If (!( $isAdmin )) {
             }
         }
 
-        WriteInfo "Starting IP for AdditionalNetworks is $global:IP"
+        WriteInfo "`t Starting IP for AdditionalNetworks is $global:IP"
 
     #Create Mount nd VMs directories
         WriteInfoHighlighted "Creating Mountdir"
-        New-Item "$PSScriptRoot\Temp\MountDir" -ItemType Directory -Force
+        New-Item $mountdir -ItemType Directory -Force
 
         WriteInfoHighlighted "Creating VMs dir"
         New-Item "$PSScriptRoot\LAB\VMs" -ItemType Directory -Force
 
     #get path for Tools disk
         WriteInfoHighlighted "Looking for Tools Parent Disks"
-        $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+        # $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+        # Begin HHH
+        # Look for tools vhd in ServerParentPath in case of multiple labs over one set of parentdisks
+        if ($LabConfig.ServerParentPath){
+            $toolsparent=Get-ChildItem $LabConfig.ServerParentPath -Recurse | Where-Object name -eq tools.vhdx
+        }else{
+            $toolsparent=Get-ChildItem "$PSScriptRoot\ParentDisks" -Recurse | Where-Object name -eq tools.vhdx
+        }
+        # End HHH
         if ($toolsparent -eq $null){
             WriteInfo "`t Tools parent disk not found. Will create one."
             WriteInfoHighlighted "Creating Tools.vhdx"
@@ -921,7 +1040,7 @@ If (!( $isAdmin )) {
 #endregion
 
 #region Import DC (if not already present) or just grab it and start
-
+    WriteInfoHighlighted "Configuring DC"
     $dcCandidate = (get-vm -Name ($labconfig.prefix+"DC") -ErrorAction SilentlyContinue)
     if($dcCandidate -and !$dcCandidate.ConfigurationLocation.StartsWith($LabFolder)) {
         WriteErrorAndExit "DC with name $($labconfig.prefix+"DC") already exists on this system in the different lab folder [$($dcCandidate.ConfigurationLocation)]..."
@@ -929,7 +1048,7 @@ If (!( $isAdmin )) {
 
     if (!(get-vm -Name ($labconfig.prefix+"DC") -ErrorAction SilentlyContinue)){
         #import DC
-            WriteInfoHighlighted "Looking for DC to be imported"
+            WriteInfo "`t Looking for DC to be imported"
             $dcCandidates = [array](Get-ChildItem $LABFolder -Recurse | Where-Object {($_.extension -eq '.vmcx' -and $_.directory -like '*Virtual Machines*') -or ($_.extension -eq '.xml' -and $_.directory -like '*Virtual Machines*')})
             $dcCandidates | ForEach-Object -Process {
                 # If the VM ID is already used create a copy of the DC VM configuration instead of in-place registration
@@ -938,7 +1057,7 @@ If (!( $isAdmin )) {
                     WriteWarning "You are trying to deploy a previously deployed lab from a different location as there is another DC VM with a same VM ID (is this a copied lab folder?) -> this DC VM will be registered with new VM ID."
                     $directory = $_.Directory.FullName.replace("\Virtual Machines", "")
                     $DC = Import-VM -Path $_.FullName -GenerateNewId -Copy -VirtualMachinePath $directory -VhdDestinationPath "$directory\Virtual Hard Disks"
-                    WriteInfo "`t Virtual Machine $($DC.Name) registered with a new VM ID $($DC.Id)"
+                    WriteInfo "`t`t Virtual Machine $($DC.Name) registered with a new VM ID $($DC.Id)"
                 } else {
                     $DC = Import-VM -Path $_.FullName
                 }
@@ -946,7 +1065,7 @@ If (!( $isAdmin )) {
             if ($DC -eq $null){
                     WriteErrorAndExit "DC was not imported successfully Press any key to continue ..."
             }else{
-                WriteInfo "`t Virtual Machine $($DC.name) located in folder $($DC.Path) imported"
+                WriteInfo "`t`t Virtual Machine $($DC.name) located in folder $($DC.Path) imported"
             }
 
         #create checkpoint to be able to return to consistent state when cleaned with cleanup.ps1
@@ -973,10 +1092,10 @@ If (!( $isAdmin )) {
 
         #add aditional networks
             if ($labconfig.AdditionalNetworksInDC -eq $True){
-                WriteInfoHighlighted "`t Configuring Additional networks"
+                WriteInfo "`t Configuring Additional networks"
                 foreach ($AdditionalNetworkConfig in $Labconfig.AdditionalNetworksConfig){
                     $DC | Add-VMNetworkAdapter -SwitchName $SwitchName -Name $AdditionalNetworkConfig.NetName
-                    WriteInfo "`t Adding Adapter $($AdditionalNetworkConfig.NetName) with IP $($AdditionalNetworkConfig.NetAddress)$global:IP"
+                    WriteInfo "`t`t Adding Adapter $($AdditionalNetworkConfig.NetName) with IP $($AdditionalNetworkConfig.NetAddress)$global:IP"
                     $DC | Get-VMNetworkAdapter -Name $AdditionalNetworkConfig.NetName | Set-VMNetworkConfiguration -IPAddress "$($AdditionalNetworkConfig.NetAddress)$global:IP" -Subnet $AdditionalNetworkConfig.Subnet
                     if($AdditionalNetworkConfig.NetVLAN -ne 0){ 
                         $DC | Get-VMNetworkAdapter -Name $AdditionalNetworkConfig.NetName  | Set-VMNetworkAdapterVlan -VlanId $AdditionalNetworkConfig.NetVLAN -Access
@@ -992,7 +1111,7 @@ If (!( $isAdmin )) {
         #add tools disk
             WriteInfo "`t Adding Tools disk to DC machine"
             $VHD=New-VHD -ParentPath "$($toolsparent.fullname)" -Path "$LABFolder\VMs\ToolsDiskDC.vhdx"
-            WriteInfo "`t `t Adding Virtual Hard Disk $($VHD.Path)"
+            WriteInfo "`t`t Adding Virtual Hard Disk $($VHD.Path)"
             $DC | Add-VMHardDiskDrive -Path $vhd.Path
 
         #modify number of CPUs
@@ -1001,10 +1120,10 @@ If (!( $isAdmin )) {
                 If ($labconfig.DCVMProcessorCount -le $NumberOfLogicalProcessors){
                     $DC | Set-VMProcessor -Count $Labconfig.DCVMProcessorCount
                 }else{
-                    WriteError "`t `t Number of processors specified in DCVMProcessorCount is greater than Logical Processors available in Host!"
-                    WriteInfo "`t `t Number of logical Processors in Host $NumberOfLogicalProcessors"
-                    WriteInfo "`t `t Number of Processors provided in labconfig $($labconfig.DCVMProcessorCount)"
-                    WriteInfo "`t `t Will configure maximum processors possible instead ($NumberOfLogicalProcessors)"
+                    WriteError "`t`t Number of processors specified in DCVMProcessorCount is greater than Logical Processors available in Host!"
+                    WriteInfo  "`t`t Number of logical Processors in Host $NumberOfLogicalProcessors"
+                    WriteInfo  "`t`t Number of Processors provided in labconfig $($labconfig.DCVMProcessorCount)"
+                    WriteInfo  "`t`t Will configure maximum processors possible instead ($NumberOfLogicalProcessors)"
                     $DC | Set-VMProcessor -Count $NumberOfLogicalProcessors
                 }
             }
@@ -1021,6 +1140,20 @@ If (!( $isAdmin )) {
             $DC=get-vm -Name ($labconfig.prefix+"DC")
     }
 
+    #add addtional subnets if specified
+    if ($ManagementSubnetIDs){
+        WriteInfo "`t Adding adapters for additional subnets"
+        foreach ($number in $ManagementSubnetIDs){
+            if ($DC | Get-VMNetworkadapter -Name "Subnet$number" -ErrorAction Ignore){
+                WriteInfo "`t`t Adapters Subnet$number already present"
+            }else{
+                WriteInfo "`t`t Adding adapter Subnet$number and configuring Access VLANID $($HighestVLAN+$number)"
+                $DC | Add-VMNetworkAdapter -SwitchName $SwitchName -Name "Subnet$number" -DeviceNaming On
+                $DC | Set-VMNetworkAdapterVlan -VMNetworkAdapterName "Subnet$number" -Access -VlanId ($HighestVLAN+$number)
+            }
+        }
+    }
+
     #Start DC if it is not running
     if ($DC.State -ne "Running"){
         WriteInfo "DC was not started. Starting now..."
@@ -1030,7 +1163,7 @@ If (!( $isAdmin )) {
     #connect to internet
     if ($labconfig.internet){
         if (-not ($DC | Get-VMNetworkAdapter -Name Internet -ErrorAction SilentlyContinue)){
-            WriteInfo "`t `t Adding Network Adapter Internet"
+            WriteInfo "`t Adding Network Adapter Internet"
             $DC | Add-VMNetworkAdapter -Name Internet -DeviceNaming On
 
             if ($DefaultSwitch){
@@ -1038,7 +1171,7 @@ If (!( $isAdmin )) {
             }else{
                 $internetSwitch = $ExternalSwitch
             }
-            WriteInfo "`t`t Connecting Network Adapter Internet to $($internetSwitch.Name)"
+            WriteInfo "`t Connecting Network Adapter Internet to $($internetSwitch.Name)"
             $DC | Get-VMNetworkAdapter -Name Internet | Connect-VMNetworkAdapter -VMSwitch $internetSwitch
         }
     }
@@ -1048,26 +1181,36 @@ If (!( $isAdmin )) {
 #region Test DC to come up
 
     #Credentials for Session
-        $username = "$($Labconfig.DomainNetbiosName)\Administrator"
+        $username = "$($Labconfig.DomainNetbiosName)\$($LabConfig.LocalAdminUser)" # HHH
         $password = $LabConfig.AdminPassword
         $secstr = New-Object -TypeName System.Security.SecureString
         $password.ToCharArray() | ForEach-Object {$secstr.AppendChar($_)}
         $cred = new-object -typename System.Management.Automation.PSCredential -argumentlist $username, $secstr
 
     #wait for DC to start
-        WriteInfoHighlighted "Waiting for Active Directory on $($DC.name) to be Started."
+        WriteInfoHighlighted "`t Waiting for Active Directory on $($DC.name) to be Started."
         do{
-            $test=Invoke-Command -VMGuid $DC.id -Credential $cred -ArgumentList $Labconfig -ErrorAction SilentlyContinue -ScriptBlock {
+            $test=Invoke-Command -VMGuid $DC.id -Credential $cred -ArgumentList $Labconfig -ErrorAction Ignore -ScriptBlock {
                 param($labconfig);
-                Get-ADComputer -Filter * -SearchBase "$($LabConfig.DN)" -ErrorAction SilentlyContinue
+                Get-ADComputer -Filter * -SearchBase "$($LabConfig.DN)" -ErrorAction Ignore
             }
             Start-Sleep 5
         }until ($test -ne $Null)
-        WriteSuccess "Active Directory on $($DC.name) is up."
+        WriteSuccess "`t Active Directory on $($DC.name) is up."
 
     #if DC was just created, configure additional settings with PowerShell direct
-        if (!$LABExists){
-            WriteInfoHighlighted "Performing some actions against DC with powershell Direct"
+         if (!$LABExists){
+            WriteInfoHighlighted "`t Performing some actions against DC with powershell Direct"
+            #Configure IP address on Internet NIC for Windows Server on Azure
+            if ($DefaultSwitch.Name -eq "InternalNAT"){
+                $startIP=(Get-VMNetworkAdapter -ManagementOS -SwitchName "InternalNat").Count+1
+                $IP="192.168.0.$startIP"
+                WriteInfo "`t Configure static IP $IP on Internet NIC"
+                Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {
+                    $NetAdapterName=(Get-NetAdapterAdvancedProperty | where displayvalue -eq Internet).Name
+                    New-NetIPAddress -InterfaceAlias $NetAdapterName -IPAddress $using:IP -PrefixLength 24 -DefaultGateway "192.168.0.1"
+                }
+            }
             #make tools disk online
                 WriteInfo "`t Making tools disk online"
                 Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {get-disk | Where-Object operationalstatus -eq offline | Set-Disk -IsReadOnly $false}
@@ -1086,17 +1229,17 @@ If (!( $isAdmin )) {
         If ($labconfig.internet){
             $cmd=Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {Get-WindowsFeature -Name Routing}
             if ($cmd.installed -eq $False){
-                WriteInfoHighlighted "`t Configuring NAT"
-                WriteInfo "`t `t Installing Routing and RSAT-RemoteAccess features"
+                WriteInfoHighlighted "`t Configuring NAT on DC"
+                WriteInfo "`t Installing Routing and RSAT-RemoteAccess features"
                 $cmd=Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {
                     Install-WindowsFeature -Name Routing,RSAT-RemoteAccess -IncludeAllSubFeature -WarningAction Ignore
                 }
                 if ($cmd.restartneeded -eq "Yes"){
-                    WriteInfo "`t `t Restart of DC is requested"
-                    WriteInfo "`t `t Restarting DC"
+                    WriteInfo "`t Restart of DC is requested"
+                    WriteInfo "`t Restarting DC"
                     $DC | Restart-VM -Force
                     Start-Sleep 10
-                    WriteInfoHighlighted "`t `t Waiting for Active Directory on $($DC.name) to be Started."
+                    WriteInfoHighlighted "`t Waiting for Active Directory on $($DC.name) to be Started."
                     do{
                         $test=Invoke-Command -VMGuid $DC.id -Credential $cred -ArgumentList $Labconfig -ErrorAction SilentlyContinue -ScriptBlock {
                             param($labconfig);
@@ -1104,13 +1247,13 @@ If (!( $isAdmin )) {
                         }
                         Start-Sleep 5
                     }until ($test -ne $Null)
-                    WriteSuccess "`t `t Active Directory on $($DC.name) is up."
+                    WriteSuccess "`t Active Directory on $($DC.name) is up."
                 }
 
                 $DNSServers=@()
 
                 if($LabConfig.UseHostDnsAsForwarder){
-                    WriteInfoHighlighted "`t Requesting DNS settings from Host"
+                    WriteInfo "`t Requesting DNS settings from Host"
                     if($internetSwitch.Name -eq "Default Switch"){
                         # Host's IP of Default Switch acts also as DNS resolver
                         $DNSServers+=(Get-HnsNetwork | Where-Object { $_.Name -eq "Default Switch" }).Subnets[0].GatewayAddress
@@ -1123,7 +1266,7 @@ If (!( $isAdmin )) {
 
                 $DNSServers+=$LabConfig.CustomDnsForwarders
 
-                WriteInfoHighlighted "`t Configuring NAT with netSH and starting services"
+                WriteInfo "`t Configuring NAT with netSH and starting services"
                 Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {
                     Set-Service -Name RemoteAccess -StartupType Automatic
                     Start-Service -Name RemoteAccess
@@ -1132,16 +1275,55 @@ If (!( $isAdmin )) {
                     netsh.exe routing ip nat set interface (Get-NetAdapterAdvancedProperty | Where-Object displayvalue -eq "Internet").Name mode=full
                     netsh.exe ras set conf confstate = enabled
                     netsh.exe routing ip dnsproxy install
-                    Write-Host "Restarting service RemoteAccess..."
+                    Write-Output "`t Restarting service RemoteAccess..."
                     Restart-Service -Name RemoteAccess -WarningAction SilentlyContinue
                     Add-DnsServerForwarder $Using:DNSServers
                 }
             }
         }
 
+    #configure NICs and routing if ManagementSubnetIDs are specified
+    if ($ManagementSubnetIDs){
+        WriteInfoHighlighted "`t Configuring subnets in DC"
+        #configure static IPs on SubnetX adapters
+        Invoke-Command -VMGuid $DC.id -Credential $cred -ScriptBlock {
+            Foreach ($number in $using:ManagementSubnetIDs){
+                $IP="10.0.$number.1"
+                $AdapterName="Subnet$Number"
+                $NetAdapterName=(Get-NetAdapterAdvancedProperty | where displayvalue -eq $AdapterName).Name
+                if (Get-NetIPAddress -InterfaceAlias $NetAdapterName -IPAddress $IP -ErrorAction Ignore){
+                    Write-Output "`t`t Subnet $AdapterName already configured"
+                }else{
+                    Write-Output "`t`t Configuring static IP address $IP on Adapter $NetAdapterName"
+                    New-NetIPAddress -InterfaceAlias $NetAdapterName -IPAddress $IP -PrefixLength 24
+                    #add dhcp scope
+                    Write-Output "`t`t Adding DHCP Scope ID 10.0.$number.0 and it's DHCP options"
+                    Add-DhcpServerv4Scope -StartRange "10.0.$number.10" -EndRange "10.0.$number.254" -Name "Scope$number" -State Active -SubnetMask 255.255.255.0
+                    Set-DhcpServerv4OptionValue -OptionId 6 -Value "10.0.0.1" -ScopeId "10.0.$number.0"
+                    Set-DhcpServerv4OptionValue -OptionId 3 -Value "10.0.1.1" -ScopeId "10.0.$number.0"
+                    Set-DhcpServerv4OptionValue -OptionId 15 -Value "$($using:Labconfig.DomainName)" -ScopeId "10.0.$number.0"
+                }
+            }
+            #make sure RRAS features are installed
+            Write-Output "`t`t  Making sure routing features are installed"
+            Install-WindowsFeature -Name Routing,RSAT-RemoteAccess -IncludeAllSubFeature -WarningAction Ignore
+            #enable routing
+            Write-Output "`t`t  Making sure routing is enabled"
+            $routingEnabled = (Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters -Name IPEnableRouter).IPEnableRouter
+            if ($routingEnabled -match "0") {
+                New-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters -Name IPEnableRouter -value 1 -Force
+            }
+            #restart routing... just to make sure
+            Write-Output "`t`t  Restarting service RemoteAccess"
+            Restart-Service RemoteAccess
+        }
+    }
+
+
 #endregion
 
 #region Provision VMs
+    $vmDeploymentEvents = @()
     #DSC config for LCM (in case Pull configuration is specified)
         WriteInfoHighlighted "Creating DSC config to configure DC as pull server"
 
@@ -1193,11 +1375,18 @@ If (!( $isAdmin )) {
 
     #process $labconfig.VMs and create VMs (skip if machine already exists)
         WriteInfoHighlighted 'Processing $LabConfig.VMs, creating VMs'
+        $provisionedVMsCount = 0
         foreach ($VMConfig in $LABConfig.VMs.GetEnumerator()){
             if (!(Get-VM -Name "$($labconfig.prefix)$($VMConfig.vmname)" -ErrorAction SilentlyContinue)){
+                $vmProvisioningStartTime = Get-Date
+
                 # Ensure that Configuration is set and use Simple as default
                 if(-not $VMConfig.configuration) {
                     $VMConfig.configuration = "Simple"
+                }
+                # Ensure that MemoryStartupBytes is set to use 512MB as default
+                if(-not $VMConfig.MemoryStartupBytes) {
+                    $VMConfig.MemoryStartupBytes = 512MB
                 }
                 
                 #create VM with Shared configuration
@@ -1220,7 +1409,7 @@ If (!( $isAdmin )) {
                                 $SharedHDDs=Get-VHD -Path "$LABfolder\VMs\SharedHDD-$VMSet-*.VHDS" -ErrorAction SilentlyContinue
                             }
                         #Build VM
-                            BuildVM -VMConfig $VMConfig -LabConfig $labconfig -LabFolder $LABfolder
+                        $createdVm = BuildVM -VMConfig $VMConfig -LabConfig $labconfig -LabFolder $LABfolder
                         #Compose VMName
                             $VMname=$Labconfig.Prefix+$VMConfig.VMName
                         #Add disks
@@ -1239,13 +1428,13 @@ If (!( $isAdmin )) {
 
                 #create VM with Simple configuration
                     if ($VMConfig.configuration -eq 'Simple'){
-                        BuildVM -VMConfig $($VMConfig) -LabConfig $labconfig -LabFolder $LABfolder
+                        $createdVm = BuildVM -VMConfig $($VMConfig) -LabConfig $labconfig -LabFolder $LABfolder
                     }
 
-                #create VM with S2D configuration 
+                #create VM with S2D configuration
                     if ($VMConfig.configuration -eq 'S2D'){
                         #build VM
-                            BuildVM -VMConfig $VMConfig -LabConfig $labconfig -LabFolder $LABfolder
+                        $createdVm = BuildVM -VMConfig $VMConfig -LabConfig $labconfig -LabFolder $LABfolder
                         #compose VM name
                             $VMname=$Labconfig.Prefix+$VMConfig.VMName
 
@@ -1286,7 +1475,7 @@ If (!( $isAdmin )) {
                                 $ReplicaLog=Get-VHD -Path "$LABfolder\VMs\ReplicaLog-$VMSet.VHDS"
                             }
                         #build VM
-                            BuildVM -VMConfig $VMConfig -LabConfig $labconfig -LabFolder $LABfolder
+                            $createdVm = BuildVM -VMConfig $VMConfig -LabConfig $labconfig -LabFolder $LABfolder
 
                         #Add disks
                             $VMname=$Labconfig.Prefix+$VMConfig.VMName                
@@ -1304,6 +1493,29 @@ If (!( $isAdmin )) {
                                     WriteInfo "`t`t $filename size $($_.size /1GB)GB added to $VMname"
                                 }
                     }
+
+                # Telemetry Report
+                if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
+                    $properties = @{
+                        'vm.configuration' = $VMConfig.Configuration
+                        'vm.unattend' = $VMConfig.Unattend
+                    }
+                    if(Test-Path -Path $createdVm.OSDiskPath) {
+                        $osInfo = Get-WindowsImage -ImagePath $createdVm.OSDiskPath -Index 1
+                        
+                        $properties.'vm.os.installationType' = $osInfo.InstallationType
+                        $properties.'vm.os.editionId' = $osInfo.EditionId
+                        $properties.'vm.os.version' = $osInfo.Version
+                    }
+
+                    $metrics = @{
+                        'vm.deploymentDuration' = ((Get-Date) - $vmProvisioningStartTime).TotalSeconds
+                    }
+                    $vmInfo = New-TelemetryEvent -Event "Deploy.VM" -Properties $properties -Metrics $metrics -NickName $LabConfig.TelemetryNickName
+                    $vmDeploymentEvents += $vmInfo
+                }
+                
+                $provisionedVMsCount += 1
             }
         }
 
@@ -1323,16 +1535,8 @@ If (!( $isAdmin )) {
         Set-VMNetworkAdapter -VMName "$($labconfig.Prefix)*" -MacAddressSpoofing On -AllowTeaming On
 
     #list VMs 
-        Get-VM | Where-Object name -like "$($labconfig.Prefix)*"  | ForEach-Object { WriteSuccess "Machine $($_.VMName) provisioned" }
-
-    #configure allowed VLANs (to create nested vNICs with VLANs)
-        if ($labconfig.AllowedVLans){
-            WriteInfo "`t Configuring AllowedVlanIdList for Management NICs to $($LabConfig.AllowedVlans)"
-            Get-VMNetworkAdapter -VMName "$($labconfig.Prefix)*" -Name Management* | Set-VMNetworkAdapterVlan -Trunk -NativeVlanId 0 -AllowedVlanIdList $LabConfig.AllowedVlans
-        }else{
-            WriteInfo "`t Configuring AllowedVlanIdList for Management NICs to 1-10"
-            Get-VMNetworkAdapter -VMName "$($labconfig.Prefix)*" -Name Management* | Set-VMNetworkAdapterVlan -Trunk -NativeVlanId 0 -AllowedVlanIdList "1-10"
-        }
+        $AllVMs = Get-VM | Where-Object name -like "$($labconfig.Prefix)*"
+        $AllVMs | ForEach-Object { WriteSuccess "Machine $($_.VMName) provisioned" }
 
     #configure HostResourceProtection on all VM CPUs
         WriteInfo "`t Configuring EnableHostResourceProtection on all VM processors"
@@ -1341,10 +1545,10 @@ If (!( $isAdmin )) {
     #Enable Guest services on all VMs if integration component if configured
     if ($labconfig.EnableGuestServiceInterface){
         WriteInfo "`t Enabling Guest Service Interface"
-        Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -eq "Running" -or $_.state -eq "Off"} | Enable-VMIntegrationService -Name "Guest Service Interface"
+        Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -eq "Running" -or $_.state -eq "Off"} | Enable-VMIntegrationService -Name $($LabConfig.GuestServiceInterfaceName) # HHH
         $TempVMs=Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object {$_.state -ne "Running" -and $_.state -ne "Off"}
         if ($TempVMs){
-            WriteInfoHighlighted "`t `t Following VMs cannot be configured, as the state is not running or off"
+            WriteInfoHighlighted "`t`t Following VMs cannot be configured, as the state is not running or off"
             $TempVMs.Name
         }
     }
@@ -1353,8 +1557,28 @@ If (!( $isAdmin )) {
         WriteInfo "`t Enabling VMNics device naming"
         Get-VM -VMName "$($labconfig.Prefix)*" | Where-Object Generation -eq 2 | Set-VMNetworkAdapter -DeviceNaming On
 
+    # Telemetry Event
+    if((Get-TelemetryLevel) -in $TelemetryEnabledLevels) {
+        WriteInfo "`t Sending telemetry info"
+        $metrics = @{
+            'script.duration' = [Math]::Round(((Get-Date) - $StartDateTime).TotalSeconds, 2)
+            'memory.available' = [Math]::Round($MemoryAvailableMB, 0)
+            'lab.vmsCount.active' = ($AllVMs | Measure-Object).Count # how many VMs are running
+            'lab.vmsCount.provisioned' = $provisionedVMsCount # how many VMs were created by this script run
+        }
+        $properties = @{
+            'lab.timezone' = $TimeZone
+            'lab.internet' = [bool]$LabConfig.Internet
+            'lab.isncrementalDeployment' = $LABExists
+        }
+        $telemetryEvent = New-TelemetryEvent -Event "Deploy.End" -Metrics $metrics -Properties $properties -NickName $LabConfig.TelemetryNickName
+        $vmDeploymentEvents += $telemetryEvent
+
+        Send-TelemetryEvents -Events $vmDeploymentEvents | Out-Null
+    }
+
     #write how much it took to deploy
-        WriteInfo "Script finished at $(Get-date) and took $(((get-date) - $StartDateTime).TotalMinutes) Minutes"
+        WriteInfo "Script finished at $(Get-Date) and took $(((Get-Date) - $StartDateTime).TotalMinutes) Minutes"
 
     Stop-Transcript
 

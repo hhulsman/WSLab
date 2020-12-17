@@ -1,10 +1,16 @@
-    # Verify Running as Admin
-    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-    If (!( $isAdmin )) {
-        Write-Host "-- Restarting as Administrator" -ForegroundColor Cyan ; Start-Sleep -Seconds 1
+# Verify Running as Admin
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+If (-not $isAdmin) {
+    Write-Host "-- Restarting as Administrator" -ForegroundColor Cyan ; Start-Sleep -Seconds 1
+
+    if($PSVersionTable.PSEdition -eq "Core") {
+        Start-Process pwsh.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
+    } else {
         Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs 
-        exit
     }
+    
+    exit
+}
 
     #region Functions
 
@@ -33,19 +39,19 @@
 
     #endregion
 
-        #region download convert-windowsimage if needed and load it
-        
-        if (!(Test-Path "$PSScriptRoot\convert-windowsimage.ps1")){
-            WriteInfo "`t Downloading Convert-WindowsImage"
-            try{
-                Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/MicrosoftDocs/Virtualization-Documentation/live/hyperv-tools/Convert-WindowsImage/Convert-WindowsImage.ps1 -OutFile "$PSScriptRoot\convert-windowsimage.ps1"
-            }catch{
-                WriteErrorAndExit "`t Failed to download convert-windowsimage.ps1!"
-            }
-        }
+    #region download convert-windowsimage if needed and load it
 
-        #load convert-windowsimage
-        . "$PSScriptRoot\convert-windowsimage.ps1"
+    if (!(Test-Path "$PSScriptRoot\Convert-WindowsImage.ps1")){
+        WriteInfo "`t Downloading Convert-WindowsImage"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/microsoft/WSLab/master/Tools/Convert-WindowsImage.ps1" -OutFile "$PSScriptRoot\Convert-WindowsImage.ps1"
+        } catch {
+            WriteErrorAndExit "`t Failed to download Convert-WindowsImage.ps1!"
+        }
+    }
+
+    #load convert-windowsimage
+    . "$PSScriptRoot\Convert-WindowsImage.ps1"
 
     #endregion
 
@@ -63,9 +69,11 @@
             WriteErrorAndExit  "Iso was not selected... Exitting"
         }
         $ISO = Mount-DiskImage -ImagePath $openFile.FileName -PassThru
-
         $ISOMediaPath = (Get-Volume -DiskImage $ISO).DriveLetter+':'
-
+        if (-not (Test-Path -Path $ISOMediaPath\sources\install.wim)){
+            $ISO | Dismount-DiskImage
+            WriteErrorAndExit "ISO does not contain install.wim. Exitting"
+        }
     #endregion
 
     #region ask for MSU packages
@@ -132,15 +140,26 @@
                 }
                 WriteErrorAndExit "`t Use Windows 7 or newer!"
             }
-            #ask for edition
-            $Edition=($WindowsImage | Out-GridView -OutputMode Single).ImageName
-            if (-not ($Edition)){
-                $ISO | Dismount-DiskImage
-                WriteErrorAndExit "Edition not selected. Exitting "
+
+            #ask for edition if more than 1
+            if ($windowsimage.count -gt 1){
+                $Edition=($WindowsImage | Out-GridView -OutputMode Single).ImageName
+                if (-not ($Edition)){
+                    $ISO | Dismount-DiskImage
+                    WriteErrorAndExit "Edition not selected. Exitting "
+                }
+            }else{
+                $edition = $windowsimage.ImageName
             }
 
             #Generate vhdx name
-            if (($Edition -like "*Server*Core*") -or ($Edition -like "Windows Server * Datacenter") -or ($Edition -like "Windows Server * Standard")){
+            if ($edition -eq "Azure Stack HCI"){
+                $tempvhdname = switch ($BuildNumber){
+                    17784 {
+                        "AzSHCI20H2_G2.vhdx"
+                    }
+                }
+            }elseif (($Edition -like "*Server*Core*") -or ($Edition -like "Windows Server * Datacenter") -or ($Edition -like "Windows Server * Standard")){
                 $tempvhdname = switch ($BuildNumber){
                     7600 {
                         "Win2008R2Core_G1.vhdx"

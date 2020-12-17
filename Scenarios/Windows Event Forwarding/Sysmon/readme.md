@@ -23,6 +23,12 @@ In this scenario I'll demonstrate installing Sysmon with [SwiftOnSecurity config
 
 This scenario is introduction to Windows Event Forwarding.
 
+List of useful resources:
+
+* [SwiftOnSecurity Sysmon config](https://github.com/SwiftOnSecurity/sysmon-config)
+* [Sysmon Modular](https://github.com/olafhartong/sysmon-modular)
+* [Sysmon Tools](https://github.com/nshalabi/SysmonTools)
+
 ## LabConfig Windows Server 2016
 
 ```PowerShell
@@ -65,8 +71,7 @@ Invoke-WebRequest -UseBasicParsing -Uri https://download.sysinternals.com/files/
 Expand-Archive -Path $env:USERPROFILE\Downloads\Sysmon.zip -DestinationPath $env:USERPROFILE\Downloads\Sysmon\
 
 #download sysmon config
-[xml]$XML=Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml
-$xml.Save("$env:USERPROFILE\Downloads\Sysmon\Sysmonconfig-export.xml")
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml -OutFile $env:USERPROFILE\Downloads\Sysmon\Sysmonconfig-export.xml
  
 ```
 
@@ -74,6 +79,11 @@ $xml.Save("$env:USERPROFILE\Downloads\Sysmon\Sysmonconfig-export.xml")
 
 ```PowerShell
 $servers="Server1","Server2"
+
+#Increase MaxEvenlope and create session to copy files to
+Invoke-Command -ComputerName $servers -ScriptBlock {Set-Item -Path WSMan:\localhost\MaxEnvelopeSizekb -Value 4096}
+
+#create PSSessions
 $sessions=New-PSSession -ComputerName $servers
 
 #copy sysmon to servers
